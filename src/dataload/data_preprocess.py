@@ -7,6 +7,7 @@ from torch_geometric.utils import to_undirected
 
 import torch.nn.functional as F
 from tqdm import tqdm
+import pandas as pd
 import random
 import pickle
 from collections import Counter
@@ -48,26 +49,47 @@ def prepare_distributed_data(cfg, mode="train"):
     print(f'Target_file is not exist. New behavior file in {target_file}')
 
     behaviors = []
-    behavior_file_path = os.path.join(data_dir[mode], 'behaviors.tsv')
+    # behavior_file_path = os.path.join(data_dir[mode], 'behaviors.tsv')
+    behavior_file_path = os.path.join(data_dir[mode], 'behaviors.parquet')
+    history_file_path = os.path.join(data_dir[mode], 'history.parquet')
 
     if mode == 'train':
-        with open(behavior_file_path, 'r', encoding='utf-8') as f:
-            for line in tqdm(f):
-                iid, uid, time, history, imp = line.strip().split('\t')
-                impressions = [x.split('-') for x in imp.split(' ')]
-                pos, neg = [], []
-                for news_ID, label in impressions:
-                    if label == '0':
-                        neg.append(news_ID)
-                    elif label == '1':
-                        pos.append(news_ID)
-                if len(pos) == 0 or len(neg) == 0:
-                    continue
-                for pos_id in pos:
-                    neg_candidate = get_sample(neg, cfg.npratio)
-                    neg_str = ' '.join(neg_candidate)
-                    new_line = '\t'.join([iid, uid, time, history, pos_id, neg_str]) + '\n'
-                    behaviors.append(new_line)
+        # with open(behavior_file_path, 'r', encoding='utf-8') as f:
+            # for line in tqdm(f):
+            #     iid, uid, time, history, imp = line.strip().split('\t')
+            #     impressions = [x.split('-') for x in imp.split(' ')]
+            #     pos, neg = [], []
+        f = pd.read_parquet(behavior_file_path)
+        hist = pd.read_parquet(history_file_path)
+        for _,line in tqdm(f.iterrows()):
+            iid = line['impression_id']
+            uid = line['user_id']
+            time = line['impression_time']
+            history = hist[hist['user_id'] == uid]['article_id_fixed']
+            imp = list(line['article_ids_inview'])
+            click = line['article_ids_clicked']
+            # print(imp)
+            # print(click)
+            # create a one hot vector of which article in impression was clicked
+            click_one_hot = [0] * len(imp)
+            click_id = [imp.index(c) for c in click]
+            for c in click_id:
+                click_one_hot[c] = 1
+            impressions = list(zip(imp, click_one_hot))
+            pos, neg = [], []
+
+            for news_ID, label in impressions:
+                if label == '0':
+                    neg.append(news_ID)
+                elif label == '1':
+                    pos.append(news_ID)
+            if len(pos) == 0 or len(neg) == 0:
+                continue
+            for pos_id in pos:
+                neg_candidate = get_sample(neg, cfg.npratio)
+                neg_str = ' '.join(neg_candidate)
+                new_line = '\t'.join([iid, uid, time, history, pos_id, neg_str]) + '\n'
+                behaviors.append(new_line)
         random.shuffle(behaviors)
 
         behaviors_per_file = [[] for _ in range(cfg.gpu_num)]
@@ -75,11 +97,31 @@ def prepare_distributed_data(cfg, mode="train"):
             behaviors_per_file[i % cfg.gpu_num].append(line)
 
     elif mode in ['val', 'test']:
-        behaviors_per_file = [[] for _ in range(cfg.gpu_num)]
-        behavior_file_path = os.path.join(data_dir[mode], 'behaviors.tsv')
-        with open(behavior_file_path, 'r', encoding='utf-8') as f:
-            for i, line in enumerate(tqdm(f)):
-                behaviors_per_file[i % cfg.gpu_num].append(line)
+        # behaviors_per_file = [[] for _ in range(cfg.gpu_num)]
+        # behavior_file_path = os.path.join(data_dir[mode], 'behaviors.tsv')
+        # with open(behavior_file_path, 'r', encoding='utf-8') as f:
+        behavior_file_path = os.path.join(data_dir[mode], 'behaviors.parquet')
+        history_file_path = os.path.join(data_dir[mode], 'history.parquet')
+        f = pd.read_parquet(behavior_file_path)
+        hist = pd.read_parquet(history_file_path)
+        lines = []
+        for _,line in tqdm(f.iterrows()):
+            iid = line['impression_id']
+            uid = line['user_id']
+            time = line['impression_time']
+            history = hist[hist['user_id'] == uid]['article_id_fixed']
+            imp = list(line['article_ids_inview'])
+            click = line['article_ids_clicked']
+            click_one_hot = [0] * len(imp)
+            click_id = [imp.index(c) for c in click]
+            for c in click_id:
+                click_one_hot[c] = 1
+            impressions = list(zip(imp, click_one_hot))
+            new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join([str(h) for h in history]), ' '.join(['-'.join([str(id), str(i)]) for id,i in impressions])]) + '\n'
+            lines.append(new_line)
+
+        for i, line in enumerate(tqdm(lines)):
+            behaviors_per_file[i % cfg.gpu_num].append(line)
 
     print(f'[{mode}]Writing files...')
     for i in range(cfg.gpu_num):
@@ -122,30 +164,40 @@ def read_raw_news(cfg, file_path, mode='train'):
     subcategory_dict = {}
     word_cnt = Counter()  # Counter is a subclass of the dictionary dict.
 
-    num_line = len(open(file_path, encoding='utf-8').readlines())
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line in tqdm(f, total=num_line, desc=f"[{mode}]Processing raw news"):
-            # split one line
-            split_line = line.strip('\n').split('\t')
-            news_id, category, subcategory, title, abstract, url, t_entity_str, _ = split_line
-            update_dict(target_dict=news_dict, key=news_id)
+    # num_line = len(open(file_path, encoding='utf-8').readlines())
+    # with open(file_path, 'r', encoding='utf-8') as f:
+    #     for line in tqdm(f, total=num_line, desc=f"[{mode}]Processing raw news"):
+            # # split one line
+            # split_line = line.strip('\n').split('\t')
+            # news_id, category, subcategory, title, abstract, url, t_entity_str, _ = split_line
+    articles = pandas.read_parquet(file_path)
+    for idx, line in tqdm(articles.iterrows(), desc=f"[{mode}]Processing raw news"):
+        news_id = line['article_id']
+        category = line['category']
+        subcategory = line['subcategory']
+        title = line['title']
+        abstract = line['subtitle']
+        url = line['url']
+        t_entity_str = line['NER']
 
-            # Entity
-            if t_entity_str:
-                entity_ids = [obj["WikidataId"] for obj in json.loads(t_entity_str)]
-                [update_dict(target_dict=entity_dict, key=entity_id) for entity_id in entity_ids]
-            else:
-                entity_ids = t_entity_str
-            
-            tokens = word_tokenize(title.lower(), language=cfg.dataset.dataset_lang)
+        update_dict(target_dict=news_dict, key=news_id)
 
-            update_dict(target_dict=news, key=news_id, value=[tokens, category, subcategory, entity_ids,
-                                                                news_dict[news_id]])
+        # Entity
+        if t_entity_str:
+            entity_ids = [obj["WikidataId"] for obj in json.loads(t_entity_str)]
+            [update_dict(target_dict=entity_dict, key=entity_id) for entity_id in entity_ids]
+        else:
+            entity_ids = t_entity_str
+        
+        tokens = word_tokenize(title.lower(), language=cfg.dataset.dataset_lang)
 
-            if mode == 'train':
-                update_dict(target_dict=category_dict, key=category)
-                update_dict(target_dict=subcategory_dict, key=subcategory)
-                word_cnt.update(tokens)
+        update_dict(target_dict=news, key=news_id, value=[tokens, category, subcategory, entity_ids,
+                                                            news_dict[news_id]])
+
+        if mode == 'train':
+            update_dict(target_dict=category_dict, key=category)
+            update_dict(target_dict=subcategory_dict, key=subcategory)
+            word_cnt.update(tokens)
 
         if mode == 'train':
             word = [k for k, v in word_cnt.items() if v > cfg.model.word_filter_num]

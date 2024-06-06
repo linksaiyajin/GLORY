@@ -172,7 +172,7 @@ def main_worker(local_rank, cfg):
         wandb.finish()
 
 
-@hydra.main(version_base="1.2", config_path=os.path.join(get_root(), "configs"), config_name="small")
+@hydra.main(version_base="1.2", config_path=os.path.join(get_root(), "configs"), config_name="EB")
 def main(cfg: DictConfig):
     seed_everything(cfg.seed)
     cfg.gpu_num = torch.cuda.device_count()

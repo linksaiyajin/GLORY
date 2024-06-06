@@ -24,6 +24,11 @@ class NewsEncoder(nn.Module):
         if cfg.dataset.dataset_lang == 'english':
             pretrain = torch.from_numpy(glove_emb).float()
             self.word_encoder = nn.Embedding.from_pretrained(pretrain, freeze=False, padding_idx=0)
+        elif cfg.dataset.dataset_lang == 'danish':
+            # self.word_encoder = nn.Embedding(glove_emb+1, 300, padding_idx=0)
+            pretrain = torch.from_file('C:\Users\lenna\Documents\UvA\RecSys\GLORY\data\google_bert_base_multilingual_cased\google_bert_base_multilingual_cased\bert_base_multilingual_cased.parquet').float()
+            self.word_encoder = nn.Embedding.from_pretrained(pretrain, freeze=False, padding_idx=0)
+            # nn.init.uniform_(self.word_encoder.weight, -1.0, 1.0)
         else:
             self.word_encoder = nn.Embedding(glove_emb+1, 300, padding_idx=0)
             nn.init.uniform_(self.word_encoder.weight, -1.0, 1.0)
