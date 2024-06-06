@@ -40,8 +40,8 @@ ml_label: default
 
 num_workers: 4
 early_stop_patience: 5
-reprocess: false
-reprocess_neighbors: false
+reprocess: true
+reprocess_neighbors: true
 warmup_ratio: 0.1
 
 val_skip_epochs: 1

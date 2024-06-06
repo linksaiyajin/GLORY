@@ -7,7 +7,7 @@ from torch_geometric.utils import to_undirected
 
 import torch.nn.functional as F
 from tqdm import tqdm
-import pandas as pd
+from pandas import read_parquet, to_numeric
 import random
 import pickle
 from collections import Counter
@@ -59,8 +59,8 @@ def prepare_distributed_data(cfg, mode="train"):
             #     iid, uid, time, history, imp = line.strip().split('\t')
             #     impressions = [x.split('-') for x in imp.split(' ')]
             #     pos, neg = [], []
-        f = pd.read_parquet(behavior_file_path)
-        hist = pd.read_parquet(history_file_path)
+        f = read_parquet(behavior_file_path)
+        hist = read_parquet(history_file_path)
         for _,line in tqdm(f.iterrows()):
             iid = line['impression_id']
             uid = line['user_id']
@@ -97,13 +97,11 @@ def prepare_distributed_data(cfg, mode="train"):
             behaviors_per_file[i % cfg.gpu_num].append(line)
 
     elif mode in ['val', 'test']:
-        # behaviors_per_file = [[] for _ in range(cfg.gpu_num)]
+        behaviors_per_file = [[] for _ in range(cfg.gpu_num)]
         # behavior_file_path = os.path.join(data_dir[mode], 'behaviors.tsv')
         # with open(behavior_file_path, 'r', encoding='utf-8') as f:
-        behavior_file_path = os.path.join(data_dir[mode], 'behaviors.parquet')
-        history_file_path = os.path.join(data_dir[mode], 'history.parquet')
-        f = pd.read_parquet(behavior_file_path)
-        hist = pd.read_parquet(history_file_path)
+        f = read_parquet(behavior_file_path)
+        hist = read_parquet(history_file_path)
         lines = []
         for _,line in tqdm(f.iterrows()):
             iid = line['impression_id']
@@ -170,7 +168,8 @@ def read_raw_news(cfg, file_path, mode='train'):
             # # split one line
             # split_line = line.strip('\n').split('\t')
             # news_id, category, subcategory, title, abstract, url, t_entity_str, _ = split_line
-    articles = pandas.read_parquet(file_path)
+    # articles = read_parquet(file_path)
+    articles = read_parquet("C:/Users/lenna/Documents/UvA/RecSys/GLORY/data/ebnerd_small/articles.parquet")
     for idx, line in tqdm(articles.iterrows(), desc=f"[{mode}]Processing raw news"):
         news_id = line['article_id']
         category = line['category']
@@ -178,13 +177,21 @@ def read_raw_news(cfg, file_path, mode='train'):
         title = line['title']
         abstract = line['subtitle']
         url = line['url']
-        t_entity_str = line['NER']
+        t_entity_str = line['ner_clusters']
 
         update_dict(target_dict=news_dict, key=news_id)
 
         # Entity
         if t_entity_str:
-            entity_ids = [obj["WikidataId"] for obj in json.loads(t_entity_str)]
+            # entity_ids = [obj["WikidataId"] for obj in json.loads(t_entity_str)]
+            import pickle
+            with open("transe_wikidata5m.pkl", "rb") as fin:
+                model = pickle.load(fin)
+            entity2id = model.graph.entity2id
+            entity_embeddings = model.solver.entity_embeddings
+            import graphvite as gv
+            alias2entity = gv.dataset.wikidata5m.alias2entity
+            entity_ids = [entity_embeddings[entity2id[alias2entity[word]]] for word in title]
             [update_dict(target_dict=entity_dict, key=entity_id) for entity_id in entity_ids]
         else:
             entity_ids = t_entity_str
@@ -240,7 +247,7 @@ def prepare_preprocess_bin(cfg, mode):
     if cfg.reprocess is True:
         # Glove
         nltk_news, nltk_news_dict, category_dict, subcategory_dict, entity_dict, word_dict = read_raw_news(
-            file_path=Path(data_dir[mode]) / "news.tsv",
+            file_path=Path(data_dir[mode]) / "articles.parquet",
             cfg=cfg,
             mode=mode,
         )
@@ -281,7 +288,8 @@ def prepare_news_graph(cfg, mode='train'):
         return
     
     # -----------------------------------------News Graph------------------------------------------------
-    behavior_path = Path(data_dir['train']) / "behaviors.tsv"
+    # behavior_path = Path(data_dir['train']) / "behaviors.tsv"
+    behavior_path = os.path.join(data_dir['train'], 'behaviors.parquet')
     origin_graph_path = Path(data_dir['train']) / "nltk_news_graph.pt"
 
     news_dict = pickle.load(open(Path(data_dir[mode]) / "news_dict.bin", "rb"))
@@ -290,23 +298,43 @@ def prepare_news_graph(cfg, mode='train'):
     # ------------------- Build Graph -------------------------------
     if mode == 'train':
         edge_list, user_set = [], set()
-        num_line = len(open(behavior_path, encoding='utf-8').readlines())
-        with open(behavior_path, 'r', encoding='utf-8') as f:
-            for line in tqdm(f, total=num_line, desc=f"[{mode}] Processing behaviors news to News Graph"):
-                line = line.strip().split('\t')
+        # num_line = len(open(behavior_path, encoding='utf-8').readlines())
+        # with open(behavior_path, 'r', encoding='utf-8') as f:
+        history_file_path = os.path.join(data_dir[mode], 'history.parquet')
+        f = read_parquet(behavior_path)
+        hist = read_parquet(history_file_path)
+        lines = []
+        for _,line in tqdm(f.iterrows()):
+            iid = line['impression_id']
+            uid = line['user_id']
+            time = line['impression_time']
+            history = hist[hist['user_id'] == uid]['article_id_fixed']
+            imp = list(line['article_ids_inview'])
+            click = line['article_ids_clicked']
+            click_one_hot = [0] * len(imp)
+            click_id = [imp.index(c) for c in click]
+            for c in click_id:
+                click_one_hot[c] = 1
+            impressions = list(zip(imp, click_one_hot))
+            new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join([str(h) for h in history]), ' '.join(['-'.join([str(id), str(i)]) for id,i in impressions])]) + '\n'
+            lines.append(new_line)
 
-                # check duplicate user
-                used_id = line[1]
-                if used_id in user_set:
-                    continue
-                else:
-                    user_set.add(used_id)
+        # for line in tqdm(f, total=num_line, desc=f"[{mode}] Processing behaviors news to News Graph"):
+        for line in tqdm(lines, desc=f"[{mode}] Processing behaviors news to News Graph"):
+            line = line.strip().split('\t')
 
-                # record cnt & read path
-                history = line[3].split()
-                if len(history) > 1:
-                    long_edge = [news_dict[news_id] for news_id in history]
-                    edge_list.append(long_edge)
+            # check duplicate user
+            used_id = line[1]
+            if used_id in user_set:
+                continue
+            else:
+                user_set.add(used_id)
+
+            # record cnt & read path
+            history = line[3].split()
+            if len(history) > 1:
+                long_edge = [news_dict[news_id] for news_id in history]
+                edge_list.append(long_edge)
 
         # edge count
         node_feat = nltk_token_news

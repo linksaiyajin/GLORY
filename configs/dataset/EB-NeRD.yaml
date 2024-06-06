@@ -3,7 +3,7 @@ defaults:
   - default
 
 dataset_name: EB-NeRD
-dataset_dir: ${path.data_dir}/ebnerd_large
+dataset_dir: ${path.data_dir}/ebnerd_small
 dataset_lang: danish
 
 train_len: 12063890 #2232748
