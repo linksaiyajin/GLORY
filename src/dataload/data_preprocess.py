@@ -184,14 +184,15 @@ def read_raw_news(cfg, file_path, mode='train'):
         # Entity
         if t_entity_str:
             # entity_ids = [obj["WikidataId"] for obj in json.loads(t_entity_str)]
+
             import pickle
-            with open("transe_wikidata5m.pkl", "rb") as fin:
-                model = pickle.load(fin)
-            entity2id = model.graph.entity2id
-            entity_embeddings = model.solver.entity_embeddings
             import graphvite as gv
             alias2entity = gv.dataset.wikidata5m.alias2entity
-            entity_ids = [entity_embeddings[entity2id[alias2entity[word]]] for word in title]
+            with open("data/transe_wikidata5m.pkl", "rb") as fin:
+                model = pickle.load(fin)
+            entity2id = model.graph.entity2id
+            entity_ids = [entity2id[alias2entity[entity]] for entity in title.split(" ")]
+            # entity_embeddings = model.solver.entity_embeddings
             [update_dict(target_dict=entity_dict, key=entity_id) for entity_id in entity_ids]
         else:
             entity_ids = t_entity_str
