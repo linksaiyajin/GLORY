@@ -10,6 +10,7 @@ from tqdm import tqdm
 from pandas import read_parquet, to_numeric
 import random
 import pickle
+import graphvite as gv
 from collections import Counter
 import numpy as np
 import torch
@@ -26,6 +27,8 @@ def update_dict(target_dict, key, value=None):
         key(string): target key
         value(Any, optional): if None, equals len(dict+1)
     """
+    # if type(key) != int and len(key) == 0:
+    #     key = None
     if key not in target_dict:
         if value is None:
             target_dict[key] = len(target_dict) + 1
@@ -65,7 +68,7 @@ def prepare_distributed_data(cfg, mode="train"):
             iid = line['impression_id']
             uid = line['user_id']
             time = line['impression_time']
-            history = hist[hist['user_id'] == uid]['article_id_fixed']
+            history = hist[hist['user_id'] == uid]['article_id_fixed'].values[0]
             imp = list(line['article_ids_inview'])
             click = line['article_ids_clicked']
             # print(imp)
@@ -76,6 +79,7 @@ def prepare_distributed_data(cfg, mode="train"):
             for c in click_id:
                 click_one_hot[c] = 1
             impressions = list(zip(imp, click_one_hot))
+            history = ' '.join(str(h) for h in history)
             pos, neg = [], []
 
             for news_ID, label in impressions:
@@ -107,7 +111,7 @@ def prepare_distributed_data(cfg, mode="train"):
             iid = line['impression_id']
             uid = line['user_id']
             time = line['impression_time']
-            history = hist[hist['user_id'] == uid]['article_id_fixed']
+            history = hist[hist['user_id'] == uid]['article_id_fixed'].values[0]
             imp = list(line['article_ids_inview'])
             click = line['article_ids_clicked']
             click_one_hot = [0] * len(imp)
@@ -115,7 +119,8 @@ def prepare_distributed_data(cfg, mode="train"):
             for c in click_id:
                 click_one_hot[c] = 1
             impressions = list(zip(imp, click_one_hot))
-            new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join([str(h) for h in history]), ' '.join(['-'.join([str(id), str(i)]) for id,i in impressions])]) + '\n'
+            # new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join([str(h) for h in history]), ' '.join(['-'.join([str(id), str(i)]) for id,i in impressions])]) + '\n'
+            new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join(str(h) for h in history), ' '.join('-'.join([str(id), str(i)]) for id,i in impressions)]) + '\n'
             lines.append(new_line)
 
         for i, line in enumerate(tqdm(lines)):
@@ -169,30 +174,34 @@ def read_raw_news(cfg, file_path, mode='train'):
             # split_line = line.strip('\n').split('\t')
             # news_id, category, subcategory, title, abstract, url, t_entity_str, _ = split_line
     # articles = read_parquet(file_path)
-    articles = read_parquet("C:/Users/lenna/Documents/UvA/RecSys/GLORY/data/ebnerd_small/articles.parquet")
+    articles = read_parquet("/home/linksaiyajin/GLORY/data/ebnerd_small/articles.parquet")
+    with open("data/transe_wikidata5m.pkl", "rb") as fin:
+        model = pickle.load(fin)
+    entity2id = model.graph.entity2id
+    alias2entity = gv.dataset.wikidata5m.alias2entity
+    
     for idx, line in tqdm(articles.iterrows(), desc=f"[{mode}]Processing raw news"):
         news_id = line['article_id']
-        category = line['category']
-        subcategory = line['subcategory']
+        category = line['category_str']
+        subcategory = line['subcategory'].flat[0] if len(line['subcategory']) != 0 else None# if (isinstance(line['subcategory'], np.ndarray) and len(line['subcategory']) != 0) else line['subcategory'] # TODO: only has ID for now, not the name
+        # subcategory = None
         title = line['title']
         abstract = line['subtitle']
         url = line['url']
-        t_entity_str = line['ner_clusters']
+        t_entity_str = set()
+        for ent in line['ner_clusters']: # add only entities that are in the title
+            for name in title:
+                if name in ent:
+                    t_entity_str.add(ent)
+        t_entity_str = list(t_entity_str)
 
         update_dict(target_dict=news_dict, key=news_id)
 
         # Entity
         if t_entity_str:
             # entity_ids = [obj["WikidataId"] for obj in json.loads(t_entity_str)]
-
-            import pickle
-            import graphvite as gv
-            alias2entity = gv.dataset.wikidata5m.alias2entity
-            with open("data/transe_wikidata5m.pkl", "rb") as fin:
-                model = pickle.load(fin)
-            entity2id = model.graph.entity2id
-            entity_ids = [entity2id[alias2entity[entity]] for entity in title.split(" ")]
-            # entity_embeddings = model.solver.entity_embeddings
+            # entity_ids = [entity2id[alias2entity[word]] for word in title.split(" ")]   # TODO: uses all words in title for now, not just entities
+            entity_ids = [entity2id[alias2entity[ent]] for ent in t_entity_str]
             [update_dict(target_dict=entity_dict, key=entity_id) for entity_id in entity_ids]
         else:
             entity_ids = t_entity_str
@@ -207,12 +216,12 @@ def read_raw_news(cfg, file_path, mode='train'):
             update_dict(target_dict=subcategory_dict, key=subcategory)
             word_cnt.update(tokens)
 
-        if mode == 'train':
-            word = [k for k, v in word_cnt.items() if v > cfg.model.word_filter_num]
-            word_dict = {k: v for k, v in zip(word, range(1, len(word) + 1))}
-            return news, news_dict, category_dict, subcategory_dict, entity_dict, word_dict
-        else:  # val, test
-            return news, news_dict, None, None, entity_dict, None
+    if mode == 'train':
+        word = [k for k, v in word_cnt.items() if v > cfg.model.word_filter_num]
+        word_dict = {k: v for k, v in zip(word, range(1, len(word) + 1))}
+        return news, news_dict, category_dict, subcategory_dict, entity_dict, word_dict
+    else:  # val, test
+        return news, news_dict, None, None, entity_dict, None
 
 
 def read_parsed_news(cfg, news, news_dict,
@@ -309,7 +318,7 @@ def prepare_news_graph(cfg, mode='train'):
             iid = line['impression_id']
             uid = line['user_id']
             time = line['impression_time']
-            history = hist[hist['user_id'] == uid]['article_id_fixed']
+            history = hist[hist['user_id'] == uid]['article_id_fixed'].values[0]
             imp = list(line['article_ids_inview'])
             click = line['article_ids_clicked']
             click_one_hot = [0] * len(imp)
@@ -317,7 +326,7 @@ def prepare_news_graph(cfg, mode='train'):
             for c in click_id:
                 click_one_hot[c] = 1
             impressions = list(zip(imp, click_one_hot))
-            new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join([str(h) for h in history]), ' '.join(['-'.join([str(id), str(i)]) for id,i in impressions])]) + '\n'
+            new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join(str(h) for h in history), ' '.join('-'.join([str(id), str(i)]) for id,i in impressions)]) + '\n'
             lines.append(new_line)
 
         # for line in tqdm(f, total=num_line, desc=f"[{mode}] Processing behaviors news to News Graph"):
