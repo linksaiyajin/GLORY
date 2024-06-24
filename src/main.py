@@ -32,15 +32,25 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
             in enumerate(tqdm(dataloader,
                               total=int(cfg.num_epochs * (cfg.dataset.pos_count // cfg.batch_size + 1)),
                               desc=f"[{local_rank}] Training"), start=1):
+
+        print('working0.1')
         subgraph = subgraph.to(local_rank, non_blocking=True)
+        print('working0.2')
         mapping_idx = mapping_idx.to(local_rank, non_blocking=True)
+        print('working0.3')
         candidate_news = candidate_news.to(local_rank, non_blocking=True)
+        print('working0.4')
         labels = labels.to(local_rank, non_blocking=True)
+        print('working0.5')
         candidate_entity = candidate_entity.to(local_rank, non_blocking=True)
+        print('working0.6')
         entity_mask = entity_mask.to(local_rank, non_blocking=True)
+        print("working1")
 
         with amp.autocast():
             bz_loss, y_hat = model(subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels)
+
+        print("working1")
             
         # Accumulate the gradients
         scaler.scale(bz_loss).backward()
@@ -66,6 +76,7 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
             sum_loss.zero_()
             sum_auc.zero_()
         
+        print("working3")
         if cnt > int(cfg.val_skip_epochs * (cfg.dataset.pos_count // cfg.batch_size + 1)) and  cnt % cfg.val_steps == 0:
             res = val(model, local_rank, cfg)
             model.train()
@@ -84,6 +95,8 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
                     save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc{res['auc']}")
                     wandb.run.summary.update({"best_auc": res["auc"],"best_mrr":res['mrr'], 
                                          "best_ndcg5":res['ndcg5'], "best_ndcg10":res['ndcg10']})
+
+        print("working4")
 
 
 
@@ -152,6 +165,7 @@ def main_worker(local_rank, cfg):
         model.load_state_dict(checkpoint['model_state_dict'])  # After Distributed
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
+    print("dist!!!")
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
     optimizer.zero_grad(set_to_none=True)
     scaler = amp.GradScaler()
@@ -164,6 +178,7 @@ def main_worker(local_rank, cfg):
                    project=cfg.logger.exp_name, name=cfg.logger.run_name)
         print(model)
 
+    print("train")
     # for _ in tqdm(range(1, cfg.num_epochs + 1), desc="Epoch"):
     train(model, optimizer, scaler, scheduler, train_dataloader, local_rank, cfg, early_stopping)
 

@@ -10,25 +10,24 @@ from tqdm import tqdm
 from pandas import read_parquet, to_numeric
 import random
 import pickle
-import graphvite as gv
 from collections import Counter
 import numpy as np
 import torch
 import json
 import itertools
 
+from flair.embeddings import WordEmbeddings
+from flair.data import Sentence
+
+import spacy
+
+
+# Initialize Danish embeddings using Flair
+danish_embedding = WordEmbeddings('da')
+
+nlp = spacy.load('da_core_news_md')
 
 def update_dict(target_dict, key, value=None):
-    """
-    Function for updating dict with key / key+value
-
-    Args:
-        target_dict(dict): target dict
-        key(string): target key
-        value(Any, optional): if None, equals len(dict+1)
-    """
-    # if type(key) != int and len(key) == 0:
-    #     key = None
     if key not in target_dict:
         if value is None:
             target_dict[key] = len(target_dict) + 1
@@ -45,35 +44,25 @@ def get_sample(all_elements, num_sample):
 
 def prepare_distributed_data(cfg, mode="train"):
     data_dir = {"train": cfg.dataset.train_dir, "val": cfg.dataset.val_dir, "test": cfg.dataset.test_dir}
-    # check
     target_file = os.path.join(data_dir[mode], f"behaviors_np{cfg.npratio}_0.tsv")
     if os.path.exists(target_file) and not cfg.reprocess:
         return 0
     print(f'Target_file is not exist. New behavior file in {target_file}')
 
     behaviors = []
-    # behavior_file_path = os.path.join(data_dir[mode], 'behaviors.tsv')
     behavior_file_path = os.path.join(data_dir[mode], 'behaviors.parquet')
     history_file_path = os.path.join(data_dir[mode], 'history.parquet')
 
     if mode == 'train':
-        # with open(behavior_file_path, 'r', encoding='utf-8') as f:
-            # for line in tqdm(f):
-            #     iid, uid, time, history, imp = line.strip().split('\t')
-            #     impressions = [x.split('-') for x in imp.split(' ')]
-            #     pos, neg = [], []
         f = read_parquet(behavior_file_path)
         hist = read_parquet(history_file_path)
-        for _,line in tqdm(f.iterrows()):
+        for _, line in tqdm(f.iterrows()):
             iid = line['impression_id']
             uid = line['user_id']
             time = line['impression_time']
             history = hist[hist['user_id'] == uid]['article_id_fixed'].values[0]
             imp = list(line['article_ids_inview'])
             click = line['article_ids_clicked']
-            # print(imp)
-            # print(click)
-            # create a one hot vector of which article in impression was clicked
             click_one_hot = [0] * len(imp)
             click_id = [imp.index(c) for c in click]
             for c in click_id:
@@ -102,12 +91,10 @@ def prepare_distributed_data(cfg, mode="train"):
 
     elif mode in ['val', 'test']:
         behaviors_per_file = [[] for _ in range(cfg.gpu_num)]
-        # behavior_file_path = os.path.join(data_dir[mode], 'behaviors.tsv')
-        # with open(behavior_file_path, 'r', encoding='utf-8') as f:
         f = read_parquet(behavior_file_path)
         hist = read_parquet(history_file_path)
         lines = []
-        for _,line in tqdm(f.iterrows()):
+        for _, line in tqdm(f.iterrows()):
             iid = line['impression_id']
             uid = line['user_id']
             time = line['impression_time']
@@ -119,8 +106,7 @@ def prepare_distributed_data(cfg, mode="train"):
             for c in click_id:
                 click_one_hot[c] = 1
             impressions = list(zip(imp, click_one_hot))
-            # new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join([str(h) for h in history]), ' '.join(['-'.join([str(id), str(i)]) for id,i in impressions])]) + '\n'
-            new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join(str(h) for h in history), ' '.join('-'.join([str(id), str(i)]) for id,i in impressions)]) + '\n'
+            new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join(str(h) for h in history), ' '.join('-'.join([str(id), str(i)]) for id, i in impressions)]) + '\n'
             lines.append(new_line)
 
         for i, line in enumerate(tqdm(lines)):
@@ -167,44 +153,50 @@ def read_raw_news(cfg, file_path, mode='train'):
     subcategory_dict = {}
     word_cnt = Counter()  # Counter is a subclass of the dictionary dict.
 
-    # num_line = len(open(file_path, encoding='utf-8').readlines())
-    # with open(file_path, 'r', encoding='utf-8') as f:
-    #     for line in tqdm(f, total=num_line, desc=f"[{mode}]Processing raw news"):
-            # # split one line
-            # split_line = line.strip('\n').split('\t')
-            # news_id, category, subcategory, title, abstract, url, t_entity_str, _ = split_line
-    # articles = read_parquet(file_path)
-    articles = read_parquet("/home/linksaiyajin/GLORY/data/ebnerd_small/articles.parquet")
-    with open("data/transe_wikidata5m.pkl", "rb") as fin:
-        model = pickle.load(fin)
-    entity2id = model.graph.entity2id
-    alias2entity = gv.dataset.wikidata5m.alias2entity
+    articles = read_parquet("data/ebnerd_small/articles_danish_ner.parquet")
+
     
     for idx, line in tqdm(articles.iterrows(), desc=f"[{mode}]Processing raw news"):
+        # print("lines", line)
         news_id = line['article_id']
         category = line['category_str']
         subcategory = line['subcategory'].flat[0] if len(line['subcategory']) != 0 else None# if (isinstance(line['subcategory'], np.ndarray) and len(line['subcategory']) != 0) else line['subcategory'] # TODO: only has ID for now, not the name
         # subcategory = None
         title = line['title']
+        # print('title', title)
+        docs = nlp(title)
+
+        ents = docs.ents
+        # print("ents", ents)
+
         abstract = line['subtitle']
         url = line['url']
-        t_entity_str = set()
-        for ent in line['ner_clusters']: # add only entities that are in the title
-            for name in title:
-                if name in ent:
-                    t_entity_str.add(ent)
-        t_entity_str = list(t_entity_str)
+
+        t_entity_str = line['ner_ids']
 
         update_dict(target_dict=news_dict, key=news_id)
 
+        entity_ids = []
+
         # Entity
-        if t_entity_str:
-            # entity_ids = [obj["WikidataId"] for obj in json.loads(t_entity_str)]
-            # entity_ids = [entity2id[alias2entity[word]] for word in title.split(" ")]   # TODO: uses all words in title for now, not just entities
-            entity_ids = [entity2id[alias2entity[ent]] for ent in t_entity_str]
-            [update_dict(target_dict=entity_dict, key=entity_id) for entity_id in entity_ids]
+        if ents:
+            # [update_dict(target_dict=entity_dict, key=entity_id) for entity_id in entity_ids]
+            # print("WORKING!!!!", ents)
+            # print("t_entity_str", t_entity_str)
+            ide = 0
+            for entity in ents:
+                sentence = Sentence(entity.text)
+                danish_embedding.embed(sentence)
+                idt = 0
+                for token in sentence:
+                    entity_id = str(idx) + "_" + str(ide) + "_" + str(idt)  # Ensure unique hashable ID
+                    entity_dict[entity_id] = token.embedding
+                    # print("entity_id", entity_id)
+                    entity_ids.append(entity_id)
+                    idt += 1
+                ide += 1
         else:
-            entity_ids = t_entity_str
+            entity_ids = []
         
         tokens = word_tokenize(title.lower(), language=cfg.dataset.dataset_lang)
 
@@ -224,10 +216,10 @@ def read_raw_news(cfg, file_path, mode='train'):
         return news, news_dict, None, None, entity_dict, None
 
 
-def read_parsed_news(cfg, news, news_dict,
-                     category_dict=None, subcategory_dict=None, entity_dict=None,
-                     word_dict=None):
+def read_parsed_news(cfg, news, news_dict, category_dict=None, subcategory_dict=None, entity_dict=None, word_dict=None):
+    # print("entity_dict", entity_dict)
     news_num = len(news) + 1
+    print("news_num", news_num) 
     news_category, news_subcategory, news_index = [np.zeros((news_num, 1), dtype='int32') for _ in range(3)]
     news_entity = np.zeros((news_num, 5), dtype='int32')
 
@@ -235,19 +227,32 @@ def read_parsed_news(cfg, news, news_dict,
 
     for _news_id in tqdm(news, total=len(news), desc="Processing parsed news"):
         _title, _category, _subcategory, _entity_ids, _news_index = news[_news_id]
+        # print("news[_news_id]", news[_news_id]) 
+        # print(_title, _category, _subcategory, _entity_ids, _news_index)
 
         news_category[_news_index, 0] = category_dict[_category] if _category in category_dict else 0
         news_subcategory[_news_index, 0] = subcategory_dict[_subcategory] if _subcategory in subcategory_dict else 0
         news_index[_news_index, 0] = news_dict[_news_id]
 
-        # entity
-        entity_index = [entity_dict[entity_id] if entity_id in entity_dict else 0 for entity_id in _entity_ids]
-        news_entity[_news_index, :min(cfg.model.entity_size, len(_entity_ids))] = entity_index[:cfg.model.entity_size]
+        # if _entity_ids:
+            # entity_embeddings = []
+            # ids = []
+            # for entity_id in _entity_ids:
+            #     print('entity_id', entity_id)
+            #     if entity_id in entity_dict:
+            #         entity_embeddings.append(entity_dict[entity_id])
+            #         print('entity_id', entity_dict[entity_id])
+            # if entity_embeddings.size > 0:
+            # entity_index = [entity_dict[entity_id] if entity_id in entity_dict else 0 for entity_id in _entity_ids]
+            # print("entity_index", entity_index)
+            # print("_entity_ids[:cfg.model.entity_size]", _entity_ids[:cfg.model.entity_size])
+        news_entity[_news_index, :min(cfg.model.entity_size, len(_entity_ids))] = _entity_ids[:cfg.model.entity_size]
 
         for _word_id in range(min(cfg.model.title_size, len(_title))):
             if _title[_word_id] in word_dict:
                 news_title[_news_index, _word_id] = word_dict[_title[_word_id]]
 
+    print(news_entity)
     return news_title, news_entity, news_category, news_subcategory, news_index
 
 
@@ -255,7 +260,6 @@ def prepare_preprocess_bin(cfg, mode):
     data_dir = {"train": cfg.dataset.train_dir, "val": cfg.dataset.val_dir, "test": cfg.dataset.test_dir}
 
     if cfg.reprocess is True:
-        # Glove
         nltk_news, nltk_news_dict, category_dict, subcategory_dict, entity_dict, word_dict = read_raw_news(
             file_path=Path(data_dir[mode]) / "articles.parquet",
             cfg=cfg,
@@ -272,11 +276,10 @@ def prepare_preprocess_bin(cfg, mode):
             word_dict = pickle.load(open(Path(data_dir["train"]) / "word_dict.bin", "rb"))
 
         pickle.dump(entity_dict, open(Path(data_dir[mode]) / "entity_dict.bin", "wb"))
+        # print(entity_dict)
         pickle.dump(nltk_news, open(Path(data_dir[mode]) / "nltk_news.bin", "wb"))
         pickle.dump(nltk_news_dict, open(Path(data_dir[mode]) / "news_dict.bin", "wb"))
-        nltk_news_features = read_parsed_news(cfg, nltk_news, nltk_news_dict,
-                                              category_dict, subcategory_dict, entity_dict,
-                                              word_dict)
+        nltk_news_features = read_parsed_news(cfg, nltk_news, nltk_news_dict, category_dict, subcategory_dict, entity_dict, word_dict)
         news_input = np.concatenate([x for x in nltk_news_features], axis=1)
         pickle.dump(news_input, open(Path(data_dir[mode]) / "nltk_token_news.bin", "wb"))
         print("Glove token preprocess finish.")
@@ -331,6 +334,7 @@ def prepare_news_graph(cfg, mode='train'):
 
         # for line in tqdm(f, total=num_line, desc=f"[{mode}] Processing behaviors news to News Graph"):
         for line in tqdm(lines, desc=f"[{mode}] Processing behaviors news to News Graph"):
+            # print("lines", lines)
             line = line.strip().split('\t')
 
             # check duplicate user
@@ -343,8 +347,11 @@ def prepare_news_graph(cfg, mode='train'):
             # record cnt & read path
             history = line[3].split()
             if len(history) > 1:
-                long_edge = [news_dict[news_id] for news_id in history]
+                # print("history1", history)
+                long_edge = [news_dict[int(news_id)] for news_id in history]
                 edge_list.append(long_edge)
+
+            # print("history2", history)
 
         # edge count
         node_feat = nltk_token_news
@@ -396,7 +403,6 @@ def prepare_news_graph(cfg, mode='train'):
 
 
 def prepare_neighbor_list(cfg, mode='train', target='news'):
-    #--------------------------------Neighbors List-------------------------------------------
     print(f"[{mode}] Start to process neighbors list")
 
     data_dir = {"train": cfg.dataset.train_dir, "val": cfg.dataset.val_dir, "test": cfg.dataset.test_dir}
@@ -408,7 +414,7 @@ def prepare_neighbor_list(cfg, mode='train', target='news'):
     for file_path in [neighbor_dict_path, weights_dict_path]:
         if file_path.exists() is False:
             reprocess_flag = True
-        
+
     if (reprocess_flag == False) and (cfg.reprocess == False) and (cfg.reprocess_neighbors == False):
         print(f"[{mode}] All {target} Neighbor dict exist !")
         return
@@ -425,23 +431,24 @@ def prepare_neighbor_list(cfg, mode='train', target='news'):
         assert False, f"[{mode}] Wrong target {target} "
 
     edge_index = graph_data.edge_index
+    print('edge_index', edge_index)
     edge_attr = graph_data.edge_attr
+    print('edge_attr', edge_attr)
 
     if cfg.model.directed is False:
         edge_index, edge_attr = to_undirected(edge_index, edge_attr)
 
     neighbor_dict = collections.defaultdict(list)
     neighbor_weights_dict = collections.defaultdict(list)
-    
-    # for each node (except 0)
-    for i in range(1, len(target_dict)+1):
-        dst_edges = torch.where(edge_index[1] == i)[0]          # i as dst
+
+    for i in range(1, len(target_dict) + 1):
+        dst_edges = torch.where(edge_index[1] == i)[0]
         neighbor_weights = edge_attr[dst_edges]
-        neighbor_nodes = edge_index[0][dst_edges]               # neighbors as src
+        neighbor_nodes = edge_index[0][dst_edges]
         sorted_weights, indices = torch.sort(neighbor_weights, descending=True)
         neighbor_dict[i] = neighbor_nodes[indices].tolist()
         neighbor_weights_dict[i] = sorted_weights.tolist()
-    
+
     pickle.dump(neighbor_dict, open(neighbor_dict_path, "wb"))
     pickle.dump(neighbor_weights_dict, open(weights_dict_path, "wb"))
     print(f"[{mode}] Finish {target} Neighbor dict \nDict Path: {neighbor_dict_path}, \nWeight Dict: {weights_dict_path}")
@@ -464,16 +471,9 @@ def prepare_entity_graph(cfg, mode='train'):
     if mode == 'train':
         target_news_graph_path = Path(data_dir[mode]) / "nltk_news_graph.pt"
         news_graph = torch.load(target_news_graph_path)
-        print("news_graph,", news_graph)
         entity_indices = news_graph.x[:, -8:-3].numpy()
-        print("entity_indices, ", entity_indices.shape)
 
         entity_edge_index = []
-        # -------- Inter-news -----------------
-        # for entity_idx in entity_indices:
-        #     entity_idx = entity_idx[entity_idx > 0]
-        #     edges = list(itertools.combinations(entity_idx, r=2))
-        #     entity_edge_index.extend(edges)
 
         news_edge_src, news_edge_dest = news_graph.edge_index
         edge_weights = news_graph.edge_attr.long().tolist()
@@ -493,14 +493,10 @@ def prepare_entity_graph(cfg, mode='train'):
         edge_index = torch.tensor(list(zip(*unique_edges)), dtype=torch.long)
         edge_attr = torch.tensor([edge_weights[edge] for edge in unique_edges], dtype=torch.long)
 
-        # --- Entity Graph Undirected
         edge_index, edge_attr = to_undirected(edge_index, edge_attr)
 
-        data = Data(x=torch.arange(len(entity_dict) + 1),
-                    edge_index=edge_index,
-                    edge_attr=edge_attr,
-                    num_nodes=len(entity_dict) + 1)
-            
+        data = Data(x=torch.arange(len(entity_dict) + 1), edge_index=edge_index, edge_attr=edge_attr, num_nodes=len(entity_dict) + 1)
+
         torch.save(data, target_path)
         print(f"[{mode}] Finish Entity Graph Construction, \n Graph Path: {target_path} \nGraph Info: {data}")
     elif mode in ['val', 'test']:
@@ -508,10 +504,8 @@ def prepare_entity_graph(cfg, mode='train'):
         edge_index = origin_graph.edge_index
         edge_attr = origin_graph.edge_attr
 
-        data = Data(x=torch.arange(len(entity_dict) + 1),
-                    edge_index=edge_index, edge_attr=edge_attr,
-                    num_nodes=len(entity_dict) + 1)
-        
+        data = Data(x=torch.arange(len(entity_dict) + 1), edge_index=edge_index, edge_attr=edge_attr, num_nodes=len(entity_dict) + 1)
+
         torch.save(data, target_path)
         print(f"[{mode}] Finish Entity Graph Construction, \n Graph Path: {target_path} \nGraph Info: {data}")
 
@@ -522,33 +516,33 @@ def prepare_preprocessed_data(cfg):
 
     prepare_preprocess_bin(cfg, "train")
     prepare_preprocess_bin(cfg, "val")
-    prepare_preprocess_bin(cfg, "test")
+    # prepare_preprocess_bin(cfg, "test")
 
     prepare_news_graph(cfg, 'train')
     prepare_news_graph(cfg, 'val')
-    prepare_news_graph(cfg, 'test')
+    # prepare_news_graph(cfg, 'test')
 
     prepare_neighbor_list(cfg, 'train', 'news')
     prepare_neighbor_list(cfg, 'val', 'news')
-    prepare_neighbor_list(cfg, 'test', 'news')
+    # prepare_neighbor_list(cfg, 'test', 'news')
 
     prepare_entity_graph(cfg, 'train')
     prepare_entity_graph(cfg, 'val')
-    prepare_entity_graph(cfg, 'test')
+    # prepare_entity_graph(cfg, 'test')
 
     prepare_neighbor_list(cfg, 'train', 'entity')
     prepare_neighbor_list(cfg, 'val', 'entity')
-    prepare_neighbor_list(cfg, 'test', 'entity')
+    # prepare_neighbor_list(cfg, 'test', 'entity')
 
-    # Entity vec process
-    data_dir = {"train":cfg.dataset.train_dir, "val":cfg.dataset.val_dir, "test":cfg.dataset.test_dir}
+    data_dir = {"train": cfg.dataset.train_dir, "val": cfg.dataset.val_dir, "test": cfg.dataset.test_dir}
     train_entity_emb_path = Path(data_dir['train']) / "entity_embedding.vec"
     val_entity_emb_path = Path(data_dir['val']) / "entity_embedding.vec"
-    test_entity_emb_path = Path(data_dir['test']) / "entity_embedding.vec"
+    # test_entity_emb_path = Path(data_dir['test']) / "entity_embedding.vec"
 
     val_combined_path = Path(data_dir['val']) / "combined_entity_embedding.vec"
-    test_combined_path = Path(data_dir['test']) / "combined_entity_embedding.vec"
+    # test_combined_path = Path(data_dir['test']) / "combined_entity_embedding.vec"
 
+    # os.system("cat " + f"{train_entity_emb_path}" + f" > {val_combined_path}")
     os.system("cat " + f"{train_entity_emb_path} {val_entity_emb_path}" + f" > {val_combined_path}")
-    os.system("cat " + f"{train_entity_emb_path} {test_entity_emb_path}" + f" > {test_combined_path}")
-
+    # os.system("cat " + f"{train_entity_emb_path} {test_entity_emb_path}" + f" > {test_combined_path}")
+    print("DONE!!!!")

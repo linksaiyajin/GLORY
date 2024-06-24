@@ -59,48 +59,73 @@ class GLORY(nn.Module):
 
     def forward(self, subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, label=None):
         # -------------------------------------- clicked ----------------------------------
+        print("Debug: Entered forward function")
         mask = mapping_idx != -1
         mapping_idx[mapping_idx == -1] = 0
 
         batch_size, num_clicked, token_dim = mapping_idx.shape[0], mapping_idx.shape[1], candidate_news.shape[-1]
+        print(f"Debug: batch_size={batch_size}, num_clicked={num_clicked}, token_dim={token_dim}")
+        
         clicked_entity = subgraph.x[mapping_idx, -8:-3]
+        print(f"Debug: clicked_entity.shape={clicked_entity.shape}")
 
         # News Encoder + GCN
         x_flatten = subgraph.x.view(1, -1, token_dim)
+        print(f"Debug: x_flatten.shape={x_flatten.shape}")
+        
         x_encoded = self.local_news_encoder(x_flatten).view(-1, self.news_dim)
+        print(f"Debug: x_encoded.shape={x_encoded.shape}")
 
         graph_emb = self.global_news_encoder(x_encoded, subgraph.edge_index)
+        print(f"Debug: graph_emb.shape={graph_emb.shape}")
 
         clicked_origin_emb = x_encoded[mapping_idx, :].masked_fill(~mask.unsqueeze(-1), 0).view(batch_size, num_clicked, self.news_dim)
         clicked_graph_emb = graph_emb[mapping_idx, :].masked_fill(~mask.unsqueeze(-1), 0).view(batch_size, num_clicked, self.news_dim)
+        print(f"Debug: clicked_origin_emb.shape={clicked_origin_emb.shape}, clicked_graph_emb.shape={clicked_graph_emb.shape}")
 
         # Attention pooling
         if self.use_entity:
             clicked_entity = self.local_entity_encoder(clicked_entity, None)
+            print(f"Debug: clicked_entity (after encoding).shape={clicked_entity.shape}")
         else:
             clicked_entity = None
+            print("Debug: clicked_entity is None")
 
         clicked_total_emb = self.click_encoder(clicked_origin_emb, clicked_graph_emb, clicked_entity)
+        print(f"Debug: clicked_total_emb.shape={clicked_total_emb.shape}")
+        
         user_emb = self.user_encoder(clicked_total_emb, mask)
+        print(f"Debug: user_emb.shape={user_emb.shape}")
 
         # ----------------------------------------- Candidate------------------------------------
-        cand_title_emb = self.local_news_encoder(candidate_news)                                      # [8, 5, 400]
+        cand_title_emb = self.local_news_encoder(candidate_news)
+        print(f"Debug: cand_title_emb.shape={cand_title_emb.shape}")
+        
         if self.use_entity:
             origin_entity, neighbor_entity = candidate_entity.split([self.cfg.model.entity_size,  self.cfg.model.entity_size * self.cfg.model.entity_neighbors], dim=-1)
+            print(f"Debug: origin_entity.shape={origin_entity.shape}, neighbor_entity.shape={neighbor_entity.shape}")
 
             cand_origin_entity_emb = self.local_entity_encoder(origin_entity, None)
             cand_neighbor_entity_emb = self.global_entity_encoder(neighbor_entity, entity_mask)
+            print(f"Debug: cand_origin_entity_emb.shape={cand_origin_entity_emb.shape}, cand_neighbor_entity_emb.shape={cand_neighbor_entity_emb.shape}")
 
             # cand_entity_emb = self.entity_encoder(candidate_entity, entity_mask).view(batch_size, -1, self.news_dim) # [8, 5, 400]
         else:
             cand_origin_entity_emb, cand_neighbor_entity_emb = None, None
+            print("Debug: cand_origin_entity_emb and cand_neighbor_entity_emb are None")
 
         cand_final_emb = self.candidate_encoder(cand_title_emb, cand_origin_entity_emb, cand_neighbor_entity_emb)
+        print(f"Debug: cand_final_emb.shape={cand_final_emb.shape}")
+        
         # ----------------------------------------- Score ------------------------------------
         score = self.click_predictor(cand_final_emb, user_emb)
+        print(f"Debug: score.shape={score.shape}")
+
         loss = self.loss_fn(score, label)
+        print(f"Debug: loss={loss}")
 
         return loss, score
+
 
     def validation_process(self, subgraph, mappings, clicked_entity, candidate_emb, candidate_entity, entity_mask):
         

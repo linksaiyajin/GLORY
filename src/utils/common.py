@@ -14,7 +14,6 @@ import torch.distributed as dist
 import importlib
 from omegaconf import DictConfig, ListConfig
 
-
 def seed_everything(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -28,17 +27,18 @@ def load_model(cfg):
 
     if cfg.model.use_entity:
         entity_dict = pickle.load(open(Path(cfg.dataset.val_dir) / "entity_dict.bin", "rb"))
-        entity_emb_path = Path(cfg.dataset.val_dir) / "combined_entity_embedding.vec"
-        entity_emb = load_pretrain_emb(entity_emb_path, entity_dict, 100)
+        entity_emb = load_pretrain_emb(entity_dict, 100)
     else:
         entity_emb = None
 
     if cfg.dataset.dataset_lang == 'english':
         word_dict = pickle.load(open(Path(cfg.dataset.train_dir) / "word_dict.bin", "rb"))
-        glove_emb = load_pretrain_emb(cfg.path.glove_path, word_dict, cfg.model.word_emb_dim)
+        glove_emb_matrix = load_pretrain_emb(word_dict, cfg.model.word_emb_dim)
+        glove_emb = torch.from_numpy(glove_emb_matrix).float()
     else:
         word_dict = pickle.load(open(Path(cfg.dataset.train_dir) / "word_dict.bin", "rb"))
         glove_emb = len(word_dict)
+    
     model = framework(cfg, glove_emb=glove_emb, entity_emb=entity_emb)
 
     return model
@@ -56,22 +56,28 @@ def save_model(cfg, model, optimizer=None, mark=None):
     print(f"Model Saved. Path = {file_path}")
 
 
-def load_pretrain_emb(embedding_file_path, target_dict, target_dim):
+def load_pretrain_emb(target_dict, target_dim):
+    print("WORKING!!!!!!!")
+    # print("target_dict", target_dict)
     embedding_matrix = np.zeros(shape=(len(target_dict) + 1, target_dim))
     have_item = []
-    if embedding_file_path is not None:
-        with open(embedding_file_path, 'rb') as f:
-            while True:
-                line = f.readline()
-                if len(line) == 0:
-                    break
-                line = line.split()
-                itme = line[0].decode()
-                if itme in target_dict:
-                    index = target_dict[itme]
-                    tp = [float(x) for x in line[1:]]
-                    embedding_matrix[index] = np.array(tp)
-                    have_item.append(itme)
+
+    # Create a mapping from unique keys to indices
+    key_to_index = {key: idx + 1 for idx, key in enumerate(target_dict.keys())}
+
+    for item, embedding in target_dict.items():
+        index = key_to_index[item]
+        embedding_np = embedding.cpu().numpy()  # Convert tensor to numpy array
+
+        # Adjust the size of the embedding to match target_dim
+        if len(embedding_np) > target_dim:
+            embedding_np = embedding_np[:target_dim]  # Truncate if too long
+        elif len(embedding_np) < target_dim:
+            embedding_np = np.pad(embedding_np, (0, target_dim - len(embedding_np)))  # Pad if too short
+
+        embedding_matrix[index] = embedding_np
+        have_item.append(item)
+    
     print('-----------------------------------------------------')
     print(f'Dict length: {len(target_dict)}')
     print(f'Have words: {len(have_item)}')
