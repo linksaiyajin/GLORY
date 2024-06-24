@@ -67,12 +67,17 @@ class GLORY(nn.Module):
 
         # News Encoder + GCN
         x_flatten = subgraph.x.view(1, -1, token_dim)
+        print("Shape of x_flatten:", x_flatten.shape)
         x_encoded = self.local_news_encoder(x_flatten).view(-1, self.news_dim)
+        print("Shape of x_encoded after local_news_encoder:", x_encoded.shape)
 
         graph_emb = self.global_news_encoder(x_encoded, subgraph.edge_index)
+        print("Shape of graph_emb:", graph_emb.shape)
 
         clicked_origin_emb = x_encoded[mapping_idx, :].masked_fill(~mask.unsqueeze(-1), 0).view(batch_size, num_clicked, self.news_dim)
+        print("Shape of clicked_origin_emb:", clicked_origin_emb.shape)
         clicked_graph_emb = graph_emb[mapping_idx, :].masked_fill(~mask.unsqueeze(-1), 0).view(batch_size, num_clicked, self.news_dim)
+        print("Shape of clicked_graph_emb:", clicked_graph_emb.shape)
 
         # Attention pooling
         if self.use_entity:

@@ -56,7 +56,9 @@ def prepare_distributed_data(cfg, mode="train"):
     if mode == 'train':
         f = read_parquet(behavior_file_path)
         hist = read_parquet(history_file_path)
-        for _, line in tqdm(f.iterrows()):
+        print(f'Loaded {len(f)} rows from behavior file and {len(hist)} rows from history file.')
+
+        for idx, line in tqdm(f.iterrows(), total=len(f)):
             iid = line['impression_id']
             uid = line['user_id']
             time = line['impression_time']
@@ -72,17 +74,23 @@ def prepare_distributed_data(cfg, mode="train"):
             pos, neg = [], []
 
             for news_ID, label in impressions:
-                if label == '0':
+                # print(news_ID, label)
+                if label == 0:
                     neg.append(news_ID)
-                elif label == '1':
+                elif label == 1:
                     pos.append(news_ID)
+            
             if len(pos) == 0 or len(neg) == 0:
                 continue
             for pos_id in pos:
                 neg_candidate = get_sample(neg, cfg.npratio)
-                neg_str = ' '.join(neg_candidate)
-                new_line = '\t'.join([iid, uid, time, history, pos_id, neg_str]) + '\n'
+                neg_str = ' '.join([str(n) for n in neg_candidate])
+                new_line = '\t'.join([str(iid), str(uid), str(time), history, str(pos_id), neg_str]) + '\n'
                 behaviors.append(new_line)
+
+        if len(behaviors) == 0:
+            print("No behaviors generated for training.")
+        
         random.shuffle(behaviors)
 
         behaviors_per_file = [[] for _ in range(cfg.gpu_num)]
