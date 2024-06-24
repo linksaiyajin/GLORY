@@ -10,6 +10,7 @@ import numpy as np
 import pyrootutils
 from pathlib import Path
 import torch.distributed as dist
+from tqdm import tqdm
 
 import importlib
 from omegaconf import DictConfig, ListConfig
@@ -26,8 +27,9 @@ def load_model(cfg):
     framework = getattr(importlib.import_module(f"models.{cfg.model.model_name}"), cfg.model.model_name)
 
     if cfg.model.use_entity:
-        entity_dict = pickle.load(open(Path(cfg.dataset.val_dir) / "entity_dict.bin", "rb"))
-        entity_emb = load_pretrain_emb(entity_dict, 100)
+        entity_dict = pickle.load(open(Path(cfg.dataset.train_dir) / "entity_dict.bin", "rb"))
+        entity_embedding_dict = pickle.load(open(Path(cfg.dataset.train_dir) / "entity_embedding_dict.bin", "rb"))
+        entity_emb = load_pretrain_emb(entity_dict, entity_embedding_dict, 300)
     else:
         entity_emb = None
 
@@ -56,33 +58,46 @@ def save_model(cfg, model, optimizer=None, mark=None):
     print(f"Model Saved. Path = {file_path}")
 
 
-def load_pretrain_emb(target_dict, target_dim):
+def load_pretrain_emb(target_dict, target_embedding_dict, target_dim):
     print("WORKING!!!!!!!")
     # print("target_dict", target_dict)
     embedding_matrix = np.zeros(shape=(len(target_dict) + 1, target_dim))
-    have_item = []
+    # have_item = []
 
+    # print('target_dict', target_dict)
+
+    # print('target_embedding_dict', target_embedding_dict)
     # Create a mapping from unique keys to indices
-    key_to_index = {key: idx + 1 for idx, key in enumerate(target_dict.keys())}
+    # key_to_index = {key: idx + 1 for idx, key in enumerate(target_dict.keys())}
 
-    for item, embedding in target_dict.items():
-        index = key_to_index[item]
-        embedding_np = embedding.cpu().numpy()  # Convert tensor to numpy array
+    # print('key_to_index', key_to_index)
 
-        # Adjust the size of the embedding to match target_dim
-        if len(embedding_np) > target_dim:
-            embedding_np = embedding_np[:target_dim]  # Truncate if too long
-        elif len(embedding_np) < target_dim:
-            embedding_np = np.pad(embedding_np, (0, target_dim - len(embedding_np)))  # Pad if too short
-
+    for ent_id, index in tqdm(target_dict.items(), desc="Processing embeddings"):
+        emb = target_embedding_dict[ent_id]
+        embedding_np = emb.cpu().numpy()
+        # print('emb len', len(emb))
         embedding_matrix[index] = embedding_np
-        have_item.append(item)
+
+
+
+    # for item, embedding in target_dict.items():
+    #     index = key_to_index[item]
+    #     embedding_np = embedding.cpu().numpy()  # Convert tensor to numpy array
+
+    #     # Adjust the size of the embedding to match target_dim
+    #     if len(embedding_np) > target_dim:
+    #         embedding_np = embedding_np[:target_dim]  # Truncate if too long
+    #     elif len(embedding_np) < target_dim:
+    #         embedding_np = np.pad(embedding_np, (0, target_dim - len(embedding_np)))  # Pad if too short
+
+    #     embedding_matrix[index] = embedding_np
+    #     have_item.append(item)
     
     print('-----------------------------------------------------')
     print(f'Dict length: {len(target_dict)}')
-    print(f'Have words: {len(have_item)}')
-    miss_rate = (len(target_dict) - len(have_item)) / len(target_dict) if len(target_dict) != 0 else 0
-    print(f'Missing rate: {miss_rate}')
+    # print(f'Have words: {len(have_item)}')
+    # miss_rate = (len(target_dict) - len(have_item)) / len(target_dict) if len(target_dict) != 0 else 0
+    # print(f'Missing rate: {miss_rate}')
     return embedding_matrix
 
 

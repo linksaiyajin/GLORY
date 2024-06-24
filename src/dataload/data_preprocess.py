@@ -155,24 +155,20 @@ def read_raw_news(cfg, file_path, mode='train'):
 
     articles = read_parquet("data/ebnerd_small/articles_danish_ner.parquet")
 
-    
+    entity_embedding_dict = {}
+
     for idx, line in tqdm(articles.iterrows(), desc=f"[{mode}]Processing raw news"):
-        # print("lines", line)
         news_id = line['article_id']
         category = line['category_str']
         subcategory = line['subcategory'].flat[0] if len(line['subcategory']) != 0 else None# if (isinstance(line['subcategory'], np.ndarray) and len(line['subcategory']) != 0) else line['subcategory'] # TODO: only has ID for now, not the name
         # subcategory = None
         title = line['title']
-        # print('title', title)
         docs = nlp(title)
 
         ents = docs.ents
-        # print("ents", ents)
 
         abstract = line['subtitle']
         url = line['url']
-
-        t_entity_str = line['ner_ids']
 
         update_dict(target_dict=news_dict, key=news_id)
 
@@ -180,23 +176,18 @@ def read_raw_news(cfg, file_path, mode='train'):
 
         # Entity
         if ents:
-            # [update_dict(target_dict=entity_dict, key=entity_id) for entity_id in entity_ids]
-            # print("WORKING!!!!", ents)
-            # print("t_entity_str", t_entity_str)
             ide = 0
             for entity in ents:
                 sentence = Sentence(entity.text)
                 danish_embedding.embed(sentence)
                 idt = 0
                 for token in sentence:
-                    entity_id = str(idx) + "_" + str(ide) + "_" + str(idt)  # Ensure unique hashable ID
-                    entity_dict[entity_id] = token.embedding
-                    # print("entity_id", entity_id)
+                    entity_id = str(idx) + "_" + str(ide) + "_" + str(idt)
+                    entity_embedding_dict[entity_id] = token.embedding
+                    update_dict(target_dict=entity_dict, key=entity_id) 
                     entity_ids.append(entity_id)
                     idt += 1
                 ide += 1
-        else:
-            entity_ids = []
         
         tokens = word_tokenize(title.lower(), language=cfg.dataset.dataset_lang)
 
@@ -211,15 +202,13 @@ def read_raw_news(cfg, file_path, mode='train'):
     if mode == 'train':
         word = [k for k, v in word_cnt.items() if v > cfg.model.word_filter_num]
         word_dict = {k: v for k, v in zip(word, range(1, len(word) + 1))}
-        return news, news_dict, category_dict, subcategory_dict, entity_dict, word_dict
+        return news, news_dict, category_dict, subcategory_dict, entity_dict, word_dict, entity_embedding_dict
     else:  # val, test
-        return news, news_dict, None, None, entity_dict, None
+        return news, news_dict, None, None, entity_dict, None, entity_embedding_dict
 
 
 def read_parsed_news(cfg, news, news_dict, category_dict=None, subcategory_dict=None, entity_dict=None, word_dict=None):
-    # print("entity_dict", entity_dict)
     news_num = len(news) + 1
-    print("news_num", news_num) 
     news_category, news_subcategory, news_index = [np.zeros((news_num, 1), dtype='int32') for _ in range(3)]
     news_entity = np.zeros((news_num, 5), dtype='int32')
 
@@ -227,32 +216,17 @@ def read_parsed_news(cfg, news, news_dict, category_dict=None, subcategory_dict=
 
     for _news_id in tqdm(news, total=len(news), desc="Processing parsed news"):
         _title, _category, _subcategory, _entity_ids, _news_index = news[_news_id]
-        # print("news[_news_id]", news[_news_id]) 
-        # print(_title, _category, _subcategory, _entity_ids, _news_index)
 
         news_category[_news_index, 0] = category_dict[_category] if _category in category_dict else 0
         news_subcategory[_news_index, 0] = subcategory_dict[_subcategory] if _subcategory in subcategory_dict else 0
         news_index[_news_index, 0] = news_dict[_news_id]
 
-        # if _entity_ids:
-            # entity_embeddings = []
-            # ids = []
-            # for entity_id in _entity_ids:
-            #     print('entity_id', entity_id)
-            #     if entity_id in entity_dict:
-            #         entity_embeddings.append(entity_dict[entity_id])
-            #         print('entity_id', entity_dict[entity_id])
-            # if entity_embeddings.size > 0:
-            # entity_index = [entity_dict[entity_id] if entity_id in entity_dict else 0 for entity_id in _entity_ids]
-            # print("entity_index", entity_index)
-            # print("_entity_ids[:cfg.model.entity_size]", _entity_ids[:cfg.model.entity_size])
         news_entity[_news_index, :min(cfg.model.entity_size, len(_entity_ids))] = _entity_ids[:cfg.model.entity_size]
 
         for _word_id in range(min(cfg.model.title_size, len(_title))):
             if _title[_word_id] in word_dict:
                 news_title[_news_index, _word_id] = word_dict[_title[_word_id]]
 
-    print(news_entity)
     return news_title, news_entity, news_category, news_subcategory, news_index
 
 
@@ -260,7 +234,7 @@ def prepare_preprocess_bin(cfg, mode):
     data_dir = {"train": cfg.dataset.train_dir, "val": cfg.dataset.val_dir, "test": cfg.dataset.test_dir}
 
     if cfg.reprocess is True:
-        nltk_news, nltk_news_dict, category_dict, subcategory_dict, entity_dict, word_dict = read_raw_news(
+        nltk_news, nltk_news_dict, category_dict, subcategory_dict, entity_dict, word_dict, entity_embedding_dict = read_raw_news(
             file_path=Path(data_dir[mode]) / "articles.parquet",
             cfg=cfg,
             mode=mode,
@@ -270,13 +244,14 @@ def prepare_preprocess_bin(cfg, mode):
             pickle.dump(category_dict, open(Path(data_dir[mode]) / "category_dict.bin", "wb"))
             pickle.dump(subcategory_dict, open(Path(data_dir[mode]) / "subcategory_dict.bin", "wb"))
             pickle.dump(word_dict, open(Path(data_dir[mode]) / "word_dict.bin", "wb"))
+            pickle.dump(entity_embedding_dict, open(Path(data_dir[mode]) / "entity_embedding_dict.bin", "wb"))
         else:
             category_dict = pickle.load(open(Path(data_dir["train"]) / "category_dict.bin", "rb"))
             subcategory_dict = pickle.load(open(Path(data_dir["train"]) / "subcategory_dict.bin", "rb"))
             word_dict = pickle.load(open(Path(data_dir["train"]) / "word_dict.bin", "rb"))
+            entity_embedding_dict = pickle.load(open(Path(data_dir["train"]) / "entity_embedding_dict.bin", "rb"))
 
         pickle.dump(entity_dict, open(Path(data_dir[mode]) / "entity_dict.bin", "wb"))
-        # print(entity_dict)
         pickle.dump(nltk_news, open(Path(data_dir[mode]) / "nltk_news.bin", "wb"))
         pickle.dump(nltk_news_dict, open(Path(data_dir[mode]) / "news_dict.bin", "wb"))
         nltk_news_features = read_parsed_news(cfg, nltk_news, nltk_news_dict, category_dict, subcategory_dict, entity_dict, word_dict)
@@ -334,7 +309,6 @@ def prepare_news_graph(cfg, mode='train'):
 
         # for line in tqdm(f, total=num_line, desc=f"[{mode}] Processing behaviors news to News Graph"):
         for line in tqdm(lines, desc=f"[{mode}] Processing behaviors news to News Graph"):
-            # print("lines", lines)
             line = line.strip().split('\t')
 
             # check duplicate user
@@ -347,11 +321,8 @@ def prepare_news_graph(cfg, mode='train'):
             # record cnt & read path
             history = line[3].split()
             if len(history) > 1:
-                # print("history1", history)
                 long_edge = [news_dict[int(news_id)] for news_id in history]
                 edge_list.append(long_edge)
-
-            # print("history2", history)
 
         # edge count
         node_feat = nltk_token_news
@@ -385,7 +356,6 @@ def prepare_news_graph(cfg, mode='train'):
                 num_nodes=num_nodes)
     
         torch.save(data, target_path)
-        print(data)
         print(f"[{mode}] Finish News Graph Construction, \nGraph Path: {target_path} \nGraph Info: {data}")
     
     elif mode in ['test', 'val']:
@@ -497,6 +467,8 @@ def prepare_entity_graph(cfg, mode='train'):
 
         data = Data(x=torch.arange(len(entity_dict) + 1), edge_index=edge_index, edge_attr=edge_attr, num_nodes=len(entity_dict) + 1)
 
+        print("DATA: ", data)
+
         torch.save(data, target_path)
         print(f"[{mode}] Finish Entity Graph Construction, \n Graph Path: {target_path} \nGraph Info: {data}")
     elif mode in ['val', 'test']:
@@ -534,15 +506,15 @@ def prepare_preprocessed_data(cfg):
     prepare_neighbor_list(cfg, 'val', 'entity')
     # prepare_neighbor_list(cfg, 'test', 'entity')
 
-    data_dir = {"train": cfg.dataset.train_dir, "val": cfg.dataset.val_dir, "test": cfg.dataset.test_dir}
-    train_entity_emb_path = Path(data_dir['train']) / "entity_embedding.vec"
-    val_entity_emb_path = Path(data_dir['val']) / "entity_embedding.vec"
+    # data_dir = {"train": cfg.dataset.train_dir, "val": cfg.dataset.val_dir, "test": cfg.dataset.test_dir}
+    # train_entity_emb_path = Path(data_dir['train']) / "entity_embedding.vec"
+    # val_entity_emb_path = Path(data_dir['val']) / "entity_embedding.vec"
     # test_entity_emb_path = Path(data_dir['test']) / "entity_embedding.vec"
 
-    val_combined_path = Path(data_dir['val']) / "combined_entity_embedding.vec"
+    # val_combined_path = Path(data_dir['val']) / "combined_entity_embedding.vec"
     # test_combined_path = Path(data_dir['test']) / "combined_entity_embedding.vec"
 
     # os.system("cat " + f"{train_entity_emb_path}" + f" > {val_combined_path}")
-    os.system("cat " + f"{train_entity_emb_path} {val_entity_emb_path}" + f" > {val_combined_path}")
+    # os.system("cat " + f"{train_entity_emb_path} {val_entity_emb_path}" + f" > {val_combined_path}")
     # os.system("cat " + f"{train_entity_emb_path} {test_entity_emb_path}" + f" > {test_combined_path}")
     print("DONE!!!!")
