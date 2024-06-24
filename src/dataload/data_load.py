@@ -61,6 +61,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
             dataloader = DataLoader(dataset,
                                     batch_size=int(cfg.batch_size / cfg.gpu_num),
                                     pin_memory=True)
+        
         return dataloader
     elif mode in ['val', 'test']:
         # convert the news to embeddings
