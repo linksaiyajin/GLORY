@@ -14,6 +14,7 @@ import torch.nn as nn
 import numpy as np
 from models.base.layers import *
 import pandas as pd
+import ast
 
 class NewsEncoder(nn.Module):
     def __init__(self, cfg, glove_emb=None):
@@ -27,9 +28,10 @@ class NewsEncoder(nn.Module):
         elif cfg.dataset.dataset_lang == 'danish':
             df = pd.read_parquet('data/bert_base_multilingual_cased.parquet')
             print('head', df.head())
-            df_numeric = df.apply(pd.to_numeric, errors='coerce')  # Convert all columns to numeric, coerce errors to NaN
-            df_numeric = df_numeric.dropna()  # Drop rows with NaN values
-            pretrain = torch.tensor(df_numeric.values).float()  # Ensure it's a 2D tensor
+            embeddings = df['google-bert/bert-base-multilingual-cased'].apply(lambda x: list(x)).tolist()
+            # print("embeddings", embeddings)
+            pretrain = torch.tensor(embeddings).float()  # Ensure it's a 2D tensor
+            # print('pretrain', pretrain)
             self.word_encoder = nn.Embedding.from_pretrained(pretrain, freeze=False, padding_idx=0)
         else:
             self.word_encoder = nn.Embedding(glove_emb+1, 300, padding_idx=0)

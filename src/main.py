@@ -22,35 +22,29 @@ from utils.common import *
 os.environ["WANDB_MODE"] = "offline"
 
 def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, early_stopping):
+    print("about to train")
     model.train()
+    print("training...")
     torch.set_grad_enabled(True)
 
+    print("still training...")
     sum_loss = torch.zeros(1).to(local_rank)
     sum_auc = torch.zeros(1).to(local_rank)
 
-    for cnt, (subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels) \
-            in enumerate(tqdm(dataloader,
-                              total=int(cfg.num_epochs * (cfg.dataset.pos_count // cfg.batch_size + 1)),
-                              desc=f"[{local_rank}] Training"), start=1):
+    print("about to start...")
 
-        print('working0.1')
+    for cnt, (subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels) in enumerate(tqdm(dataloader, total=int(cfg.num_epochs * (cfg.dataset.pos_count // cfg.batch_size + 1)), desc=f"[{local_rank}] Training"), start=1):
+
         subgraph = subgraph.to(local_rank, non_blocking=True)
-        print('working0.2')
         mapping_idx = mapping_idx.to(local_rank, non_blocking=True)
-        print('working0.3')
         candidate_news = candidate_news.to(local_rank, non_blocking=True)
-        print('working0.4')
         labels = labels.to(local_rank, non_blocking=True)
-        print('working0.5')
         candidate_entity = candidate_entity.to(local_rank, non_blocking=True)
-        print('working0.6')
         entity_mask = entity_mask.to(local_rank, non_blocking=True)
-        print("working1")
 
         with amp.autocast():
             bz_loss, y_hat = model(subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels)
 
-        print("working1")
             
         # Accumulate the gradients
         scaler.scale(bz_loss).backward()
@@ -76,7 +70,6 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
             sum_loss.zero_()
             sum_auc.zero_()
         
-        print("working3")
         if cnt > int(cfg.val_skip_epochs * (cfg.dataset.pos_count // cfg.batch_size + 1)) and  cnt % cfg.val_steps == 0:
             res = val(model, local_rank, cfg)
             model.train()
@@ -95,8 +88,6 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
                     save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc{res['auc']}")
                     wandb.run.summary.update({"best_auc": res["auc"],"best_mrr":res['mrr'], 
                                          "best_ndcg5":res['ndcg5'], "best_ndcg10":res['ndcg10']})
-
-        print("working4")
 
 
 
