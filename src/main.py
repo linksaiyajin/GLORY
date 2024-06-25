@@ -76,7 +76,7 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
             sum_loss.zero_()
             sum_auc.zero_()
         
-        if (cnt % cfg.log_steps == 0) or (cnt > int(cfg.val_skip_epochs * (train_dataset_len // cfg.batch_size + 1)) and  cnt % cfg.val_steps == 0):
+        if cnt % cfg.val_steps == 0:
             res = val(model, local_rank, cfg)
             model.train()
 

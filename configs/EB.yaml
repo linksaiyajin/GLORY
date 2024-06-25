@@ -45,4 +45,4 @@ reprocess_neighbors: true
 warmup_ratio: 0.1
 
 val_skip_epochs: 1
-val_steps: 10000
+val_steps: 5000
