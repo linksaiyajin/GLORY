@@ -6,11 +6,11 @@ dataset_name: EB-NeRD
 dataset_dir: ${path.data_dir}/ebnerd_small
 dataset_lang: danish
 
-train_len: 12063890 #2232748
-val_len: 12566385 #376471
+train_len: 58441 #12063890 #2232748
+val_len: 61162 #12566385 #376471
 test_len: 13536710 #2370727
 
-pos_count: 3383656
+pos_count: 58441 #3383656
 
 # Info
 word_num: 101232

@@ -19,21 +19,17 @@ from utils.common import *
 
 ### custom your wandb setting here ###
 # os.environ["WANDB_API_KEY"] = ""
-os.environ["WANDB_MODE"] = "offline"
+# os.environ["WANDB_MODE"] = "offline"
 
 def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, early_stopping):
-    print("about to train")
     model.train()
-    print("training...")
     torch.set_grad_enabled(True)
 
-    print("still training...")
     sum_loss = torch.zeros(1).to(local_rank)
     sum_auc = torch.zeros(1).to(local_rank)
-
-    print("about to start...")
-
-    print("Checking dataloader...")
+    
+    train_dataset_len = len(dataloader)
+    print('train : len(dataloader)', len(dataloader))
     for cnt, batch in enumerate(dataloader, start=1):
         print(f"Batch {cnt} received from dataloader")
         if cnt == 1:
@@ -41,7 +37,8 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
     print("Dataloader check completed.")
 
 
-    for cnt, (subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels) in enumerate(tqdm(dataloader, total=int(cfg.num_epochs * (cfg.dataset.pos_count // cfg.batch_size + 1)), desc=f"[{local_rank}] Training"), start=1):
+    for cnt, (subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels) \
+        in enumerate(tqdm(dataloader, total=int(train_dataset_len), desc=f"[{local_rank}] Training"), start=1):
         # print(f"Batch {cnt} - Data received from dataloader")
 
         subgraph = subgraph.to(local_rank, non_blocking=True)
@@ -57,7 +54,7 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
             
         # Accumulate the gradients
         scaler.scale(bz_loss).backward()
-        if cnt % cfg.accumulation_steps == 0 or cnt == int(cfg.dataset.pos_count / cfg.batch_size):
+        if cnt % cfg.accumulation_steps == 0 or cnt == int(train_dataset_len / cfg.batch_size):
             # Update the parameters
             scaler.step(optimizer)
             old_scaler = scaler.get_scale()
@@ -79,7 +76,7 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
             sum_loss.zero_()
             sum_auc.zero_()
         
-        if cnt > int(cfg.val_skip_epochs * (cfg.dataset.pos_count // cfg.batch_size + 1)) and  cnt % cfg.val_steps == 0:
+        if (cnt % cfg.log_steps == 0) or (cnt > int(cfg.val_skip_epochs * (train_dataset_len // cfg.batch_size + 1)) and  cnt % cfg.val_steps == 0):
             res = val(model, local_rank, cfg)
             model.train()
 
@@ -103,11 +100,14 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
 def val(model, local_rank, cfg):
     model.eval()
     dataloader = load_data(cfg, mode='val', model=model, local_rank=local_rank)
+    val_dataset_len = len(dataloader)
+    print('train : len(dataloader)', len(dataloader))
     tasks = []
+    print('gpus', cfg.gpu_num)
     with torch.no_grad():
         for cnt, (subgraph, mappings, clicked_entity, candidate_input, candidate_entity, entity_mask, labels) \
                 in enumerate(tqdm(dataloader,
-                                  total=int(cfg.dataset.val_len / cfg.gpu_num ),
+                                  total=int(val_dataset_len),
                                   desc=f"[{local_rank}] Validating")):
             candidate_emb = torch.FloatTensor(np.array(candidate_input)).to(local_rank, non_blocking=True)
             candidate_entity = candidate_entity.to(local_rank, non_blocking=True)
