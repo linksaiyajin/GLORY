@@ -27,8 +27,12 @@ class NewsEncoder(nn.Module):
             self.word_encoder = nn.Embedding.from_pretrained(pretrain, freeze=False, padding_idx=0)
         elif cfg.dataset.dataset_lang == 'danish':
             df = pd.read_parquet('data/bert_base_multilingual_cased.parquet')
-            print('head', df.head())
+            # item_dimensions = df['google-bert/bert-base-multilingual-cased'].iloc[0]
+            # item_shape = (len(item_dimensions),)
+            # print('item_shape', item_shape)
+            # print('head', df.head())
             embeddings = df['google-bert/bert-base-multilingual-cased'].apply(lambda x: list(x)).tolist()
+            # print('len(embeddings)', len(embeddings))
             # print("embeddings", embeddings)
             pretrain = torch.tensor(embeddings).float()  # Ensure it's a 2D tensor
             # print('pretrain', pretrain)
@@ -59,23 +63,16 @@ class NewsEncoder(nn.Module):
 
 
     def forward(self, news_input, mask=None):
-        """
-        Args:
-            news_input:  [batch_size, news_num, total_input]  eg. [64,50,82] [64,50,96]
-            mask:   [batch_size, news_num]
-        Returns:
-            [batch_size, news_num, news_emb] eg. [64,50,400]
-        """
         batch_size = news_input.shape[0]
         num_news = news_input.shape[1]
 
-        # [batch_size * news_num, view_size, word_emb_dim]
         title_input, _, _, _, _ = news_input.split([self.view_size[0], 5, 1, 1, 1], dim=-1)
-
         title_word_emb = self.word_encoder(title_input.long().view(-1, self.view_size[0]))
 
         total_word_emb = title_word_emb
+        # print("Shape of total_word_emb:", total_word_emb.shape)
 
         result = self.attention(total_word_emb, mask)
+        # print("Shape of result after attention:", result.shape)
 
-        return result.view(batch_size, num_news, self.news_dim)     # [batch, num_news, news_dim]
+        return result.view(batch_size, num_news, self.news_dim)

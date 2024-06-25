@@ -42,7 +42,7 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
 
 
     for cnt, (subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels) in enumerate(tqdm(dataloader, total=int(cfg.num_epochs * (cfg.dataset.pos_count // cfg.batch_size + 1)), desc=f"[{local_rank}] Training"), start=1):
-        print(f"Batch {cnt} - Data received from dataloader")
+        # print(f"Batch {cnt} - Data received from dataloader")
 
         subgraph = subgraph.to(local_rank, non_blocking=True)
         mapping_idx = mapping_idx.to(local_rank, non_blocking=True)

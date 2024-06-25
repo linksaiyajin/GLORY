@@ -102,15 +102,34 @@ class MultiHeadAttention(nn.Module):
             mask: batch_size, candidate_num
         """
         batch_size = Q.shape[0]
-        if mask is not None:
-            mask = mask.unsqueeze(dim=1).expand(-1, self.head_num, -1)
+        seq_length = Q.shape[1]
+        # print("Shape of Q:", Q.shape)
+        # print("Shape of K:", K.shape)
+        # print("Shape of V:", V.shape)
 
-        q_s = self.W_Q(Q).view(batch_size, -1, self.head_num, self.head_dim).transpose(1, 2)
-        k_s = self.W_K(K).view(batch_size, -1, self.head_num, self.head_dim).transpose(1, 2)
-        v_s = self.W_V(V).view(batch_size, -1, self.head_num, self.head_dim).transpose(1, 2)
+        if mask is not None:
+            # print('Mask')
+            mask = mask.unsqueeze(dim=1).expand(-1, self.head_num, -1)
+            # print("Shape of mask after unsqueeze and expand:", mask.shape)
+
+        # print('W_Q', self.W_Q)
+
+        # print('batch_size', batch_size)
+        # print('seq_length', seq_length)
+        # print('self.head_num', self.head_num)
+        # print('self.head_dim',self.head_dim)
+
+        q_s = self.W_Q(Q).view(batch_size, seq_length, self.head_num, self.head_dim).transpose(1, 2)
+        # print("Shape of q_s after W_Q and view:", q_s.shape)
+        k_s = self.W_K(K).view(batch_size, seq_length, self.head_num, self.head_dim).transpose(1, 2)
+        # print("Shape of k_s after W_K and view:", k_s.shape)
+        v_s = self.W_V(V).view(batch_size, seq_length, self.head_num, self.head_dim).transpose(1, 2)
+        # print("Shape of v_s after W_V and view:", v_s.shape)
 
         context = self.scaled_dot_product_attn(q_s, k_s, v_s, mask)
-        output = context.transpose(1, 2).contiguous().view(batch_size, -1, self.head_num * self.head_dim)
+        # print("Shape of context after scaled_dot_product_attn:", context.shape)
+        output = context.transpose(1, 2).contiguous().view(batch_size, seq_length, self.head_num * self.head_dim)
+        # print("Shape of output after transpose and view:", output.shape)
         if self.residual:
             output += Q
         return output
