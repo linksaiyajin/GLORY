@@ -20,8 +20,6 @@ wget 'https://ebnerd-dataset.s3.eu-west-1.amazonaws.com/articles_large_only.zip'
 ```
 
 
-
-
 ### Environment
 > Python 3.8.10
 > pytorch 1.13.1+cu117
@@ -40,6 +38,19 @@ python -m spacy download 'da_core_news_md'
 # Run
 python3 src/main.py model=GLORY dataset=MINDsmall reprocess=True
 ```
+
+
+### Changes to original code
+- src/dataload/data_preprocess.py
+  - Adapt data preprocessing to correctly load and process the EB-NeRD dataset.
+  - Use spacy danish NER model to extract entities
+  - 
+
+- src/models/component/news_encoder.py
+  - Use pre-trained danish bert embeddings instead of glove embeddings
+
+- src/main.py
+
 
 ### Bibliography
 
