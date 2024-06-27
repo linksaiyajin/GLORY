@@ -100,7 +100,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                 stacked_news.append(batch_emb)
         news_emb = torch.cat(stacked_news, dim=0).cpu().numpy()
 
-        if cfg.model.use_graph:
+        if cfg.model.use_graph and mode != 'test':
             print("Loading news graph...")
             news_graph = torch.load(Path(data_dir[mode]) / "nltk_news_graph.pt")
             print(f"[{mode}] News Graph Info: {news_graph}")
@@ -140,7 +140,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
         else:
             if mode == 'val':
                 print("Creating ValidDataset for validation...")
-                dataset = ValidDataset(
+                dataset = TrainDataset(
                     filename=Path(data_dir[mode]) / f"behaviors_{local_rank}.tsv",
                     news_index=news_index,
                     news_emb=news_emb,
@@ -150,7 +150,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                 print("ValidDataset for validation created.")
             else:
                 print("Creating ValidDataset for test...")
-                dataset = ValidDataset(
+                dataset = TrainDataset(
                     filename=Path(data_dir[mode]) / f"behaviors.tsv",
                     news_index=news_index,
                     news_emb=news_emb,

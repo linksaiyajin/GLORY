@@ -64,11 +64,11 @@ def prepare_distributed_data(cfg, mode="train"):
             time = line['impression_time']
             history = hist[hist['user_id'] == uid]['article_id_fixed'].values[0]
             imp = list(line['article_ids_inview'])
-            click = line['article_ids_clicked']
+            # click = line['article_ids_clicked']
             click_one_hot = [0] * len(imp)
-            click_id = [imp.index(c) for c in click]
-            for c in click_id:
-                click_one_hot[c] = 1
+            # click_id = [imp.index(c) for c in click]
+            # for c in click_id:
+                # click_one_hot[c] = 1
             impressions = list(zip(imp, click_one_hot))
             history = ' '.join(str(h) for h in history)
             pos, neg = [], []
@@ -108,11 +108,11 @@ def prepare_distributed_data(cfg, mode="train"):
             time = line['impression_time']
             history = hist[hist['user_id'] == uid]['article_id_fixed'].values[0]
             imp = list(line['article_ids_inview'])
-            click = line['article_ids_clicked']
+            # click = line['article_ids_clicked']
             click_one_hot = [0] * len(imp)
-            click_id = [imp.index(c) for c in click]
-            for c in click_id:
-                click_one_hot[c] = 1
+            # click_id = [imp.index(c) for c in click]
+            # for c in click_id:
+                # click_one_hot[c] = 1
             impressions = list(zip(imp, click_one_hot))
             new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join(str(h) for h in history), ' '.join('-'.join([str(id), str(i)]) for id, i in impressions)]) + '\n'
             lines.append(new_line)
@@ -161,11 +161,13 @@ def read_raw_news(cfg, file_path, mode='train'):
     subcategory_dict = {}
     word_cnt = Counter()  # Counter is a subclass of the dictionary dict.
 
-    articles = read_parquet("data/ebnerd_small/articles_danish_ner.parquet")
+    if mode in ['train', 'val']:
+        articles = read_parquet("data/ebnerd_small/articles.parquet")
 
     entity_embedding_dict = {}
 
     for idx, line in tqdm(articles.iterrows(), desc=f"[{mode}]Processing raw news"):
+        print("line", line)
         news_id = line['article_id']
         category = line['category_str']
         subcategory = line['subcategory'].flat[0] if len(line['subcategory']) != 0 else None# if (isinstance(line['subcategory'], np.ndarray) and len(line['subcategory']) != 0) else line['subcategory'] # TODO: only has ID for now, not the name
@@ -306,11 +308,11 @@ def prepare_news_graph(cfg, mode='train'):
             time = line['impression_time']
             history = hist[hist['user_id'] == uid]['article_id_fixed'].values[0]
             imp = list(line['article_ids_inview'])
-            click = line['article_ids_clicked']
+            # click = line['article_ids_clicked']
             click_one_hot = [0] * len(imp)
-            click_id = [imp.index(c) for c in click]
-            for c in click_id:
-                click_one_hot[c] = 1
+            # click_id = [imp.index(c) for c in click]
+            # for c in click_id:
+                # click_one_hot[c] = 1
             impressions = list(zip(imp, click_one_hot))
             new_line = '\t'.join([str(iid), str(uid), str(time), ' '.join(str(h) for h in history), ' '.join('-'.join([str(id), str(i)]) for id,i in impressions)]) + '\n'
             lines.append(new_line)
@@ -491,8 +493,8 @@ def prepare_entity_graph(cfg, mode='train'):
 
 
 def prepare_preprocessed_data(cfg):
-    prepare_distributed_data(cfg, "train")
-    prepare_distributed_data(cfg, "val")
+    # prepare_distributed_data(cfg, "train")
+    # prepare_distributed_data(cfg, "val")
 
     prepare_preprocess_bin(cfg, "train")
     prepare_preprocess_bin(cfg, "val")

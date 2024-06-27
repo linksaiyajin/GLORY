@@ -17,9 +17,9 @@ accumulation_steps: 1   # final acutal batch_size = batch_size * accumulation_st
 gpu_num: 4 #4
 
 # load or not
-load_checkpoint: false
-load_mark: base_large
-train_mode: true
+load_checkpoint: true
+load_mark: default_auc_best
+train_mode: false
 val_mode: true
 
 model:

@@ -244,7 +244,6 @@ class ValidGraphDataset(TrainGraphDataset):
                 batch, mapping_idx, clicked_entity, candidate_input, candidate_entity, entity_mask, labels = self.line_mapper(line)
             yield batch, mapping_idx, clicked_entity, candidate_input, candidate_entity, entity_mask, labels
 
-
 class NewsDataset(Dataset):
     def __init__(self, data):
         self.data = data
