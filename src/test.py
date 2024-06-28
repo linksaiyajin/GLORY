@@ -39,11 +39,13 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
             break
     print("Dataloader check completed.")
 
+    # validation
+
     res = val(model, local_rank, cfg)
     model.train()
 
     if local_rank == 0:
-        save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc_best")
+        # save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc_best")
         wandb.run.summary.update({"best_auc": res["auc"],"best_mrr":res['mrr'], 
                             "best_ndcg5":res['ndcg5'], "best_ndcg10":res['ndcg10']})
 
@@ -51,77 +53,12 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
         wandb.log(res)
 
 
-    # for cnt, (subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels) \
-    #     in enumerate(tqdm(dataloader, total=int(train_dataset_len), desc=f"[{local_rank}] Training"), start=1):
-    #     # print(f"Batch {cnt} - Data received from dataloader")
-
-    #     subgraph = subgraph.to(local_rank, non_blocking=True)
-    #     mapping_idx = mapping_idx.to(local_rank, non_blocking=True)
-    #     candidate_news = candidate_news.to(local_rank, non_blocking=True)
-    #     labels = labels.to(local_rank, non_blocking=True)
-    #     candidate_entity = candidate_entity.to(local_rank, non_blocking=True)
-    #     entity_mask = entity_mask.to(local_rank, non_blocking=True)
-
-    #     with amp.autocast():
-    #         bz_loss, y_hat = model(subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels)
-
-            
-    #     # Accumulate the gradients
-    #     scaler.scale(bz_loss).backward()
-    #     if cnt % cfg.accumulation_steps == 0 or cnt == int(train_dataset_len / cfg.batch_size):
-    #         # Update the parameters
-    #         scaler.step(optimizer)
-    #         old_scaler = scaler.get_scale()
-    #         scaler.update()
-    #         new_scaler = scaler.get_scale()
-    #         if new_scaler >= old_scaler:
-    #             scheduler.step()
-    #             ## https://discuss.pytorch.org/t/userwarning-detected-call-of-lr-scheduler-step-before-optimizer-step/164814
-    #         optimizer.zero_grad(set_to_none=True)
-
-    #     sum_loss += bz_loss.data.float()
-    #     sum_auc += area_under_curve(labels, y_hat)
-    #     # ---------------------------------------- Training Log
-    #     if cnt % cfg.log_steps == 0:
-    #         if local_rank == 0:
-    #             wandb.log({"train_loss": sum_loss.item() / cfg.log_steps, "train_auc": sum_auc.item() / cfg.log_steps})
-    #         print('[{}] Ed: {}, average_loss: {:.5f}, average_acc: {:.5f}'.format(
-    #             local_rank, cnt * cfg.batch_size, sum_loss.item() / cfg.log_steps, sum_auc.item() / cfg.log_steps))
-    #         sum_loss.zero_()
-    #         sum_auc.zero_()
-        
-    #     if cnt % cfg.val_steps == 0:
-    #         res = val(model, local_rank, cfg)
-    #         model.train()
-
-    #         if local_rank == 0:
-    #             save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc_best")
-    #             wandb.run.summary.update({"best_auc": res["auc"],"best_mrr":res['mrr'], 
-    #                                 "best_ndcg5":res['ndcg5'], "best_ndcg10":res['ndcg10']})
-
-    #             pretty_print(res)
-    #             wandb.log(res)
-
-    #         early_stop, get_better = early_stopping(res['auc'])
-    #         if early_stop:
-    #             print("Early Stop.")
-    #             break
-    #         elif get_better:
-    #             print(f"Better Result!")
-    #             if local_rank == 0:
-    #                 save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc{res['auc']}")
-    #                 wandb.run.summary.update({"best_auc": res["auc"],"best_mrr":res['mrr'], 
-    #                                      "best_ndcg5":res['ndcg5'], "best_ndcg10":res['ndcg10']})
-
-
 
 def val(model, local_rank, cfg):
     model.eval()
     dataloader = load_data(cfg, mode='val', model=model, local_rank=local_rank)
     val_dataset_len = len(dataloader)
-    print('val : len(dataloader)', len(dataloader))
     tasks = []
-    print('gpus', cfg.gpu_num)
     with torch.no_grad():
         for cnt, (subgraph, mappings, clicked_entity, candidate_input, candidate_entity, entity_mask, labels) \
                 in enumerate(tqdm(dataloader,
@@ -140,7 +77,6 @@ def val(model, local_rank, cfg):
         results = pool.map(cal_metric, tasks)
     val_auc, val_mrr, val_ndcg5, val_ndcg10 = np.array(results).T
 
-    print(val_auc, val_mrr, val_ndcg5, val_ndcg10)
 
     # barrier
     torch.distributed.barrier()
@@ -229,7 +165,6 @@ def main_worker(local_rank, cfg):
         model.load_state_dict(checkpoint['model_state_dict'])  # After Distributed
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-    print("dist!!!")
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
     optimizer.zero_grad(set_to_none=True)
     scaler = amp.GradScaler()
@@ -242,9 +177,7 @@ def main_worker(local_rank, cfg):
                    project=cfg.logger.exp_name, name=cfg.logger.run_name)
         print(model)
 
-    print("train")
-    # for _ in tqdm(range(1, cfg.num_epochs + 1), desc="Epoch"):
-    train(model, optimizer, scaler, scheduler, train_dataloader, local_rank, cfg, early_stopping)
+    val(model, local_rank, cfg)
 
 
     if local_rank == 0:
