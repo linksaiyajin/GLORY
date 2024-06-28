@@ -27,16 +27,9 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
 
     sum_loss = torch.zeros(1).to(local_rank)
     sum_auc = torch.zeros(1).to(local_rank)
-    
-    train_dataset_len = len(dataloader)
-    for cnt, batch in enumerate(dataloader, start=1):
-        print(f"Batch {cnt} received from dataloader")
-        if cnt == 1:
-            break
-
 
     for cnt, (subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels) \
-        in enumerate(tqdm(dataloader, total=int(train_dataset_len), desc=f"[{local_rank}] Training"), start=1):
+        in enumerate(tqdm(dataloader, total=int(len(dataloader)), desc=f"[{local_rank}] Training"), start=1):
 
         subgraph = subgraph.to(local_rank, non_blocking=True)
         mapping_idx = mapping_idx.to(local_rank, non_blocking=True)
@@ -47,11 +40,10 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
 
         with amp.autocast():
             bz_loss, y_hat = model(subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels)
-
             
         # Accumulate the gradients
         scaler.scale(bz_loss).backward()
-        if cnt % cfg.accumulation_steps == 0 or cnt == int(train_dataset_len / cfg.batch_size):
+        if cnt % cfg.accumulation_steps == 0 or cnt == int(len(dataloader) / cfg.batch_size):
             # Update the parameters
             scaler.step(optimizer)
             old_scaler = scaler.get_scale()
@@ -101,12 +93,11 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
 def val(model, local_rank, cfg):
     model.eval()
     dataloader = load_data(cfg, mode='val', model=model, local_rank=local_rank)
-    val_dataset_len = len(dataloader)
     tasks = []
     with torch.no_grad():
         for cnt, (subgraph, mappings, clicked_entity, candidate_input, candidate_entity, entity_mask, labels) \
                 in enumerate(tqdm(dataloader,
-                                  total=int(val_dataset_len),
+                                  total=int(len(dataloader)),
                                   desc=f"[{local_rank}] Validating")):
             candidate_emb = torch.FloatTensor(np.array(candidate_input)).to(local_rank, non_blocking=True)
             candidate_entity = candidate_entity.to(local_rank, non_blocking=True)

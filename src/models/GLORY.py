@@ -68,7 +68,9 @@ class GLORY(nn.Module):
         # News Encoder + GCN
         x_flatten = subgraph.x.view(1, -1, token_dim)
         x_encoded = self.local_news_encoder(x_flatten).view(-1, self.news_dim)
+        
         graph_emb = self.global_news_encoder(x_encoded, subgraph.edge_index)
+
         clicked_origin_emb = x_encoded[mapping_idx, :].masked_fill(~mask.unsqueeze(-1), 0).view(batch_size, num_clicked, self.news_dim)
         clicked_graph_emb = graph_emb[mapping_idx, :].masked_fill(~mask.unsqueeze(-1), 0).view(batch_size, num_clicked, self.news_dim)
 

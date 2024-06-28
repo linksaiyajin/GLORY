@@ -44,12 +44,24 @@ python3 src/main.py model=GLORY dataset=MINDsmall reprocess=True
 - src/dataload/data_preprocess.py
   - Adapt data preprocessing to correctly load and process the EB-NeRD dataset.
   - Use spacy danish NER model to extract entities
-  - 
 
 - src/models/component/news_encoder.py
   - Use pre-trained danish bert embeddings instead of glove embeddings
 
 - src/main.py
+  - Increse validation frequency
+
+- configs/model/default.yaml
+  - Updated to support flair and bert embeddings
+
+- src/models/component/news_encoder.py
+  - Utilize bert pretrain model as danish word encoder
+
+- src/test.py
+  - Same as main.py but just loads the model (load_checkpoint=True) and validates (tests) its
+
+- src/utils/common.py
+  - Load build embeddings dictionary and construct entity embedding matrix
 
 
 ### Bibliography

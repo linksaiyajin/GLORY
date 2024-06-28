@@ -26,7 +26,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
 
             if cfg.model.directed is False:
                 news_graph.edge_index, news_graph.edge_attr = to_undirected(news_graph.edge_index, news_graph.edge_attr)
-                print(f"[{mode}] News Graph Info: {news_graph}")
+            print(f"[{mode}] News Graph Info: {news_graph}")
 
             news_neighbors_dict = pickle.load(open(Path(data_dir[mode]) / "news_neighbor_dict.bin", "rb"))
 
@@ -47,7 +47,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                 news_graph=news_graph,
                 entity_neighbors=entity_neighbors
             )
-            print(f"TrainGraphDataset created with {len(dataset)} samples.")
+
             dataloader = DataLoader(dataset, batch_size=None)
             
         else:
@@ -113,7 +113,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
             dataloader = DataLoader(dataset, batch_size=None)
         else:
             if mode == 'val':
-                dataset = TrainDataset(
+                dataset = ValidDataset(
                     filename=Path(data_dir[mode]) / f"behaviors_{local_rank}.tsv",
                     news_index=news_index,
                     news_emb=news_emb,
@@ -121,7 +121,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                     cfg=cfg,
                 )
             else:
-                dataset = TrainDataset(
+                dataset = ValidDataset(
                     filename=Path(data_dir[mode]) / f"behaviors.tsv",
                     news_index=news_index,
                     news_emb=news_emb,
