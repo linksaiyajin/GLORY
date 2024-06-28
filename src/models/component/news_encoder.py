@@ -27,15 +27,8 @@ class NewsEncoder(nn.Module):
             self.word_encoder = nn.Embedding.from_pretrained(pretrain, freeze=False, padding_idx=0)
         elif cfg.dataset.dataset_lang == 'danish':
             df = pd.read_parquet('data/bert_base_multilingual_cased.parquet')
-            # item_dimensions = df['google-bert/bert-base-multilingual-cased'].iloc[0]
-            # item_shape = (len(item_dimensions),)
-            # print('item_shape', item_shape)
-            # print('head', df.head())
             embeddings = df['google-bert/bert-base-multilingual-cased'].apply(lambda x: list(x)).tolist()
-            # print('len(embeddings)', len(embeddings))
-            # print("embeddings", embeddings)
             pretrain = torch.tensor(embeddings).float()  # Ensure it's a 2D tensor
-            # print('pretrain', pretrain)
             self.word_encoder = nn.Embedding.from_pretrained(pretrain, freeze=False, padding_idx=0)
         else:
             self.word_encoder = nn.Embedding(glove_emb+1, 300, padding_idx=0)
@@ -70,9 +63,7 @@ class NewsEncoder(nn.Module):
         title_word_emb = self.word_encoder(title_input.long().view(-1, self.view_size[0]))
 
         total_word_emb = title_word_emb
-        # print("Shape of total_word_emb:", total_word_emb.shape)
 
         result = self.attention(total_word_emb, mask)
-        # print("Shape of result after attention:", result.shape)
 
         return result.view(batch_size, num_news, self.news_dim)

@@ -476,8 +476,6 @@ def prepare_entity_graph(cfg, mode='train'):
 
         data = Data(x=torch.arange(len(entity_dict) + 1), edge_index=edge_index, edge_attr=edge_attr, num_nodes=len(entity_dict) + 1)
 
-        print("DATA: ", data)
-
         torch.save(data, target_path)
         print(f"[{mode}] Finish Entity Graph Construction, \n Graph Path: {target_path} \nGraph Info: {data}")
     elif mode in ['val', 'test']:

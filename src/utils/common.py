@@ -59,7 +59,6 @@ def save_model(cfg, model, optimizer=None, mark=None):
 
 
 def load_pretrain_emb(target_dict, target_embedding_dict, target_dim):
-    print("WORKING!!!!!!!")
     embedding_matrix = np.zeros(shape=(len(target_dict) + 1, target_dim))
 
     for ent_id, index in tqdm(target_dict.items(), desc="Processing embeddings"):

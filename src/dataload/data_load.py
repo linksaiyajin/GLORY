@@ -14,39 +14,29 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
     data_dir = {"train": cfg.dataset.train_dir, "val": cfg.dataset.val_dir, "test": cfg.dataset.test_dir}
 
     # ------------- load news.tsv-------------
-    print("Loading news index...")
     news_index = pickle.load(open(Path(data_dir[mode]) / "news_dict.bin", "rb"))
-    print("News index loaded.")
 
-    print("Loading news input...")
     news_input = pickle.load(open(Path(data_dir[mode]) / "nltk_token_news.bin", "rb"))
-    print("News input loaded.")
 
     # ------------- load behaviors_np{X}.tsv --------------
     if mode == 'train':
         target_file = Path(data_dir[mode]) / f"behaviors_np{cfg.npratio}_{local_rank}.tsv"
         if cfg.model.use_graph:
-            print("Loading news graph...")
             news_graph = torch.load(Path(data_dir[mode]) / "nltk_news_graph.pt")
-            print(f"[{mode}] News Graph Info: {news_graph}")
 
             if cfg.model.directed is False:
                 news_graph.edge_index, news_graph.edge_attr = to_undirected(news_graph.edge_index, news_graph.edge_attr)
-                print("Converted news graph to undirected.")
+                print(f"[{mode}] News Graph Info: {news_graph}")
 
-            print("Loading news neighbors dictionary...")
             news_neighbors_dict = pickle.load(open(Path(data_dir[mode]) / "news_neighbor_dict.bin", "rb"))
-            print("News neighbors dictionary loaded.")
 
             if cfg.model.use_entity:
-                print("Loading entity neighbors dictionary...")
                 entity_neighbors = pickle.load(open(Path(data_dir[mode]) / "entity_neighbor_dict.bin", "rb"))
                 total_length = sum(len(lst) for lst in entity_neighbors.values())
                 print(f"[{mode}] entity_neighbor list Length: {total_length}")
             else:
                 entity_neighbors = None
 
-            print("Creating TrainGraphDataset...")
             dataset = TrainGraphDataset(
                 filename=target_file,
                 news_index=news_index,
@@ -61,7 +51,6 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
             dataloader = DataLoader(dataset, batch_size=None)
             
         else:
-            print("Creating TrainDataset...")
             dataset = TrainDataset(
                 filename=target_file,
                 news_index=news_index,
@@ -69,26 +58,19 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                 local_rank=local_rank,
                 cfg=cfg,
             )
-            print("TrainDataset created.")
 
             dataloader = DataLoader(dataset,
                                     batch_size=int(cfg.batch_size / cfg.gpu_num),
                                     pin_memory=True)
-        
-        print(f"TrainDataset created with {len(dataset)} samples.")
 
-        print(f"Dataloader created with {len(dataloader)} batches.")
         return dataloader
     elif mode in ['val', 'test']:
         # convert the news to embeddings
-        print("Creating NewsDataset...")
         news_dataset = NewsDataset(news_input)
-        print("NewsDataset created.")
 
         news_dataloader = DataLoader(news_dataset,
                                      batch_size=int(cfg.batch_size * cfg.gpu_num),
                                      num_workers=cfg.num_workers)
-        print("News dataloader created.")
 
         stacked_news = []
         with torch.no_grad():
@@ -101,20 +83,14 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
         news_emb = torch.cat(stacked_news, dim=0).cpu().numpy()
 
         if cfg.model.use_graph and mode != 'test':
-            print("Loading news graph...")
             news_graph = torch.load(Path(data_dir[mode]) / "nltk_news_graph.pt")
-            print(f"[{mode}] News Graph Info: {news_graph}")
 
-            print("Loading news neighbors dictionary...")
             news_neighbors_dict = pickle.load(open(Path(data_dir[mode]) / "news_neighbor_dict.bin", "rb"))
-            print("News neighbors dictionary loaded.")
 
             if cfg.model.directed is False:
                 news_graph.edge_index, news_graph.edge_attr = to_undirected(news_graph.edge_index, news_graph.edge_attr)
-                print("Converted news graph to undirected.")
 
             if cfg.model.use_entity:
-                print("Loading entity neighbors dictionary...")
                 entity_neighbors = pickle.load(open(Path(data_dir[mode]) / "entity_neighbor_dict.bin", "rb"))
                 total_length = sum(len(lst) for lst in entity_neighbors.values())
                 print(f"[{mode}] entity_neighbor list Length: {total_length}")
@@ -122,7 +98,6 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                 entity_neighbors = None
 
             if mode == 'val':
-                print("Creating ValidGraphDataset...")
                 dataset = ValidGraphDataset(
                     filename=Path(data_dir[mode]) / f"behaviors_np{cfg.npratio}_{local_rank}.tsv",
                     news_index=news_index,
@@ -134,12 +109,10 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                     news_entity=news_input[:, -8:-3],
                     entity_neighbors=entity_neighbors
                 )
-                print("ValidGraphDataset created.")
 
             dataloader = DataLoader(dataset, batch_size=None)
         else:
             if mode == 'val':
-                print("Creating ValidDataset for validation...")
                 dataset = TrainDataset(
                     filename=Path(data_dir[mode]) / f"behaviors_{local_rank}.tsv",
                     news_index=news_index,
@@ -147,9 +120,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                     local_rank=local_rank,
                     cfg=cfg,
                 )
-                print("ValidDataset for validation created.")
             else:
-                print("Creating ValidDataset for test...")
                 dataset = TrainDataset(
                     filename=Path(data_dir[mode]) / f"behaviors.tsv",
                     news_index=news_index,
@@ -157,12 +128,10 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                     local_rank=local_rank,
                     cfg=cfg,
                 )
-                print("ValidDataset for test created.")
 
             dataloader = DataLoader(dataset,
                                     batch_size=1,
                                     collate_fn=lambda b: collate_fn(b, local_rank))
-        print("Dataloader created.")
         return dataloader
 
 def collate_fn(tuple_list, local_rank):

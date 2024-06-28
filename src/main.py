@@ -20,7 +20,6 @@ from utils.common import *
 ### custom your wandb setting here ###
 # os.environ["WANDB_API_KEY"] = ""
 # os.environ["WANDB_MODE"] = "offline"
-os.environ["WANDB_API_KEY"] = "4fbf74f08e1faaadbc3bcd8d184d16f04338332b"
 
 def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, early_stopping):
     model.train()
@@ -30,17 +29,14 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
     sum_auc = torch.zeros(1).to(local_rank)
     
     train_dataset_len = len(dataloader)
-    print('train : len(dataloader)', len(dataloader))
     for cnt, batch in enumerate(dataloader, start=1):
         print(f"Batch {cnt} received from dataloader")
         if cnt == 1:
             break
-    print("Dataloader check completed.")
 
 
     for cnt, (subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels) \
         in enumerate(tqdm(dataloader, total=int(train_dataset_len), desc=f"[{local_rank}] Training"), start=1):
-        # print(f"Batch {cnt} - Data received from dataloader")
 
         subgraph = subgraph.to(local_rank, non_blocking=True)
         mapping_idx = mapping_idx.to(local_rank, non_blocking=True)
@@ -106,56 +102,12 @@ def val(model, local_rank, cfg):
     model.eval()
     dataloader = load_data(cfg, mode='val', model=model, local_rank=local_rank)
     val_dataset_len = len(dataloader)
-    print('val : len(dataloader)', len(dataloader))
     tasks = []
-    print('gpus', cfg.gpu_num)
     with torch.no_grad():
         for cnt, (subgraph, mappings, clicked_entity, candidate_input, candidate_entity, entity_mask, labels) \
                 in enumerate(tqdm(dataloader,
                                   total=int(val_dataset_len),
                                   desc=f"[{local_rank}] Validating")):
-            candidate_emb = torch.FloatTensor(np.array(candidate_input)).to(local_rank, non_blocking=True)
-            candidate_entity = candidate_entity.to(local_rank, non_blocking=True)
-            entity_mask = entity_mask.to(local_rank, non_blocking=True)
-            clicked_entity = clicked_entity.to(local_rank, non_blocking=True)
-
-            scores = model.module.validation_process(subgraph, mappings, clicked_entity, candidate_emb, candidate_entity, entity_mask)
-            
-            tasks.append((labels.tolist(), scores))
-
-    with mp.Pool(processes=cfg.num_workers) as pool:
-        results = pool.map(cal_metric, tasks)
-    val_auc, val_mrr, val_ndcg5, val_ndcg10 = np.array(results).T
-
-    # barrier
-    torch.distributed.barrier()
-
-    reduced_auc = reduce_mean(torch.tensor(np.nanmean(val_auc)).float().to(local_rank), cfg.gpu_num)
-    reduced_mrr = reduce_mean(torch.tensor(np.nanmean(val_mrr)).float().to(local_rank), cfg.gpu_num)
-    reduced_ndcg5 = reduce_mean(torch.tensor(np.nanmean(val_ndcg5)).float().to(local_rank), cfg.gpu_num)
-    reduced_ndcg10 = reduce_mean(torch.tensor(np.nanmean(val_ndcg10)).float().to(local_rank), cfg.gpu_num)
-
-    res = {
-        "auc": reduced_auc.item(),
-        "mrr": reduced_mrr.item(),
-        "ndcg5": reduced_ndcg5.item(),
-        "ndcg10": reduced_ndcg10.item(),
-    }
-    
-    return res
-
-def test(model, local_rank, cfg):
-    model.eval()
-    dataloader = load_data(cfg, mode='test', model=model, local_rank=local_rank)
-    val_dataset_len = len(dataloader)
-    print('test : len(dataloader)', len(dataloader))
-    tasks = []
-    print('gpus', cfg.gpu_num)
-    with torch.no_grad():
-        for cnt, (subgraph, mappings, clicked_entity, candidate_input, candidate_entity, entity_mask, labels) \
-                in enumerate(tqdm(dataloader,
-                                  total=int(val_dataset_len),
-                                  desc=f"[{local_rank}] Testing")):
             candidate_emb = torch.FloatTensor(np.array(candidate_input)).to(local_rank, non_blocking=True)
             candidate_entity = candidate_entity.to(local_rank, non_blocking=True)
             entity_mask = entity_mask.to(local_rank, non_blocking=True)
@@ -212,7 +164,6 @@ def main_worker(local_rank, cfg):
         model.load_state_dict(checkpoint['model_state_dict'])  # After Distributed
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
-    print("dist!!!")
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
     optimizer.zero_grad(set_to_none=True)
     scaler = amp.GradScaler()
@@ -225,7 +176,6 @@ def main_worker(local_rank, cfg):
                    project=cfg.logger.exp_name, name=cfg.logger.run_name)
         print(model)
 
-    print("train")
     # for _ in tqdm(range(1, cfg.num_epochs + 1), desc="Epoch"):
     train(model, optimizer, scaler, scheduler, train_dataloader, local_rank, cfg, early_stopping)
 
