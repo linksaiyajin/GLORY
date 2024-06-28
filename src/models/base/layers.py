@@ -102,15 +102,19 @@ class MultiHeadAttention(nn.Module):
             mask: batch_size, candidate_num
         """
         batch_size = Q.shape[0]
+        seq_length = Q.shape[1]
+
         if mask is not None:
             mask = mask.unsqueeze(dim=1).expand(-1, self.head_num, -1)
 
-        q_s = self.W_Q(Q).view(batch_size, -1, self.head_num, self.head_dim).transpose(1, 2)
-        k_s = self.W_K(K).view(batch_size, -1, self.head_num, self.head_dim).transpose(1, 2)
-        v_s = self.W_V(V).view(batch_size, -1, self.head_num, self.head_dim).transpose(1, 2)
+
+        q_s = self.W_Q(Q).view(batch_size, seq_length, self.head_num, self.head_dim).transpose(1, 2)
+        k_s = self.W_K(K).view(batch_size, seq_length, self.head_num, self.head_dim).transpose(1, 2)
+        v_s = self.W_V(V).view(batch_size, seq_length, self.head_num, self.head_dim).transpose(1, 2)
 
         context = self.scaled_dot_product_attn(q_s, k_s, v_s, mask)
-        output = context.transpose(1, 2).contiguous().view(batch_size, -1, self.head_num * self.head_dim)
+        output = context.transpose(1, 2).contiguous().view(batch_size, seq_length, self.head_num * self.head_dim)
+
         if self.residual:
             output += Q
         return output

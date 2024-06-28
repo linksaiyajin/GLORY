@@ -1,3 +1,5 @@
+
+# Testing
 import os.path
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from utils.common import *
 ### custom your wandb setting here ###
 # os.environ["WANDB_API_KEY"] = ""
 # os.environ["WANDB_MODE"] = "offline"
+os.environ["WANDB_API_KEY"] = "4fbf74f08e1faaadbc3bcd8d184d16f04338332b"
 
 def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, early_stopping):
     model.train()
@@ -29,72 +32,25 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
     sum_auc = torch.zeros(1).to(local_rank)
     
     train_dataset_len = len(dataloader)
+    print('train : len(dataloader)', len(dataloader))
     for cnt, batch in enumerate(dataloader, start=1):
         print(f"Batch {cnt} received from dataloader")
         if cnt == 1:
             break
+    print("Dataloader check completed.")
 
+    # validation
 
-    for cnt, (subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels) \
-        in enumerate(tqdm(dataloader, total=int(train_dataset_len), desc=f"[{local_rank}] Training"), start=1):
+    res = val(model, local_rank, cfg)
+    model.train()
 
-        subgraph = subgraph.to(local_rank, non_blocking=True)
-        mapping_idx = mapping_idx.to(local_rank, non_blocking=True)
-        candidate_news = candidate_news.to(local_rank, non_blocking=True)
-        labels = labels.to(local_rank, non_blocking=True)
-        candidate_entity = candidate_entity.to(local_rank, non_blocking=True)
-        entity_mask = entity_mask.to(local_rank, non_blocking=True)
+    if local_rank == 0:
+        # save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc_best")
+        wandb.run.summary.update({"best_auc": res["auc"],"best_mrr":res['mrr'], 
+                            "best_ndcg5":res['ndcg5'], "best_ndcg10":res['ndcg10']})
 
-        with amp.autocast():
-            bz_loss, y_hat = model(subgraph, mapping_idx, candidate_news, candidate_entity, entity_mask, labels)
-
-            
-        # Accumulate the gradients
-        scaler.scale(bz_loss).backward()
-        if cnt % cfg.accumulation_steps == 0 or cnt == int(train_dataset_len / cfg.batch_size):
-            # Update the parameters
-            scaler.step(optimizer)
-            old_scaler = scaler.get_scale()
-            scaler.update()
-            new_scaler = scaler.get_scale()
-            if new_scaler >= old_scaler:
-                scheduler.step()
-                ## https://discuss.pytorch.org/t/userwarning-detected-call-of-lr-scheduler-step-before-optimizer-step/164814
-            optimizer.zero_grad(set_to_none=True)
-
-        sum_loss += bz_loss.data.float()
-        sum_auc += area_under_curve(labels, y_hat)
-        # ---------------------------------------- Training Log
-        if cnt % cfg.log_steps == 0:
-            if local_rank == 0:
-                wandb.log({"train_loss": sum_loss.item() / cfg.log_steps, "train_auc": sum_auc.item() / cfg.log_steps})
-            print('[{}] Ed: {}, average_loss: {:.5f}, average_acc: {:.5f}'.format(
-                local_rank, cnt * cfg.batch_size, sum_loss.item() / cfg.log_steps, sum_auc.item() / cfg.log_steps))
-            sum_loss.zero_()
-            sum_auc.zero_()
-        
-        if cnt % cfg.val_steps == 0:
-            res = val(model, local_rank, cfg)
-            model.train()
-
-            if local_rank == 0:
-                save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc_best")
-                wandb.run.summary.update({"best_auc": res["auc"],"best_mrr":res['mrr'], 
-                                    "best_ndcg5":res['ndcg5'], "best_ndcg10":res['ndcg10']})
-
-                pretty_print(res)
-                wandb.log(res)
-
-            early_stop, get_better = early_stopping(res['auc'])
-            if early_stop:
-                print("Early Stop.")
-                break
-            elif get_better:
-                print(f"Better Result!")
-                if local_rank == 0:
-                    save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc{res['auc']}")
-                    wandb.run.summary.update({"best_auc": res["auc"],"best_mrr":res['mrr'], 
-                                         "best_ndcg5":res['ndcg5'], "best_ndcg10":res['ndcg10']})
+        pretty_print(res)
+        wandb.log(res)
 
 
 
@@ -108,6 +64,51 @@ def val(model, local_rank, cfg):
                 in enumerate(tqdm(dataloader,
                                   total=int(val_dataset_len),
                                   desc=f"[{local_rank}] Validating")):
+            candidate_emb = torch.FloatTensor(np.array(candidate_input)).to(local_rank, non_blocking=True)
+            candidate_entity = candidate_entity.to(local_rank, non_blocking=True)
+            entity_mask = entity_mask.to(local_rank, non_blocking=True)
+            clicked_entity = clicked_entity.to(local_rank, non_blocking=True)
+
+            scores = model.module.validation_process(subgraph, mappings, clicked_entity, candidate_emb, candidate_entity, entity_mask)
+            
+            tasks.append((labels.tolist(), scores))
+
+    with mp.Pool(processes=cfg.num_workers) as pool:
+        results = pool.map(cal_metric, tasks)
+    val_auc, val_mrr, val_ndcg5, val_ndcg10 = np.array(results).T
+
+
+    # barrier
+    torch.distributed.barrier()
+
+    reduced_auc = reduce_mean(torch.tensor(np.nanmean(val_auc)).float().to(local_rank), cfg.gpu_num)
+    reduced_mrr = reduce_mean(torch.tensor(np.nanmean(val_mrr)).float().to(local_rank), cfg.gpu_num)
+    reduced_ndcg5 = reduce_mean(torch.tensor(np.nanmean(val_ndcg5)).float().to(local_rank), cfg.gpu_num)
+    reduced_ndcg10 = reduce_mean(torch.tensor(np.nanmean(val_ndcg10)).float().to(local_rank), cfg.gpu_num)
+
+    res = {
+        "auc": reduced_auc.item(),
+        "mrr": reduced_mrr.item(),
+        "ndcg5": reduced_ndcg5.item(),
+        "ndcg10": reduced_ndcg10.item(),
+    }
+
+    print('res', res)
+    
+    return res
+
+def test(model, local_rank, cfg):
+    model.eval()
+    dataloader = load_data(cfg, mode='test', model=model, local_rank=local_rank)
+    val_dataset_len = len(dataloader)
+    print('test : len(dataloader)', len(dataloader))
+    tasks = []
+    print('gpus', cfg.gpu_num)
+    with torch.no_grad():
+        for cnt, (subgraph, mappings, clicked_entity, candidate_input, candidate_entity, entity_mask, labels) \
+                in enumerate(tqdm(dataloader,
+                                  total=int(val_dataset_len),
+                                  desc=f"[{local_rank}] Testing")):
             candidate_emb = torch.FloatTensor(np.array(candidate_input)).to(local_rank, non_blocking=True)
             candidate_entity = candidate_entity.to(local_rank, non_blocking=True)
             entity_mask = entity_mask.to(local_rank, non_blocking=True)
@@ -176,8 +177,7 @@ def main_worker(local_rank, cfg):
                    project=cfg.logger.exp_name, name=cfg.logger.run_name)
         print(model)
 
-    # for _ in tqdm(range(1, cfg.num_epochs + 1), desc="Epoch"):
-    train(model, optimizer, scaler, scheduler, train_dataloader, local_rank, cfg, early_stopping)
+    val(model, local_rank, cfg)
 
 
     if local_rank == 0:
@@ -188,7 +188,7 @@ def main_worker(local_rank, cfg):
 def main(cfg: DictConfig):
     seed_everything(cfg.seed)
     cfg.gpu_num = torch.cuda.device_count()
-    prepare_preprocessed_data(cfg)
+    # prepare_preprocessed_data(cfg)
     mp.spawn(main_worker, nprocs=cfg.gpu_num, args=(cfg,))
 
 

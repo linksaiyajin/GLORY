@@ -17,6 +17,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
     news_index = pickle.load(open(Path(data_dir[mode]) / "news_dict.bin", "rb"))
 
     news_input = pickle.load(open(Path(data_dir[mode]) / "nltk_token_news.bin", "rb"))
+
     # ------------- load behaviors_np{X}.tsv --------------
     if mode == 'train':
         target_file = Path(data_dir[mode]) / f"behaviors_np{cfg.npratio}_{local_rank}.tsv"
@@ -25,8 +26,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
 
             if cfg.model.directed is False:
                 news_graph.edge_index, news_graph.edge_attr = to_undirected(news_graph.edge_index, news_graph.edge_attr)
-            print(f"[{mode}] News Graph Info: {news_graph}")
-
+                print(f"[{mode}] News Graph Info: {news_graph}")
 
             news_neighbors_dict = pickle.load(open(Path(data_dir[mode]) / "news_neighbor_dict.bin", "rb"))
 
@@ -47,6 +47,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                 news_graph=news_graph,
                 entity_neighbors=entity_neighbors
             )
+            print(f"TrainGraphDataset created with {len(dataset)} samples.")
             dataloader = DataLoader(dataset, batch_size=None)
             
         else:
@@ -61,10 +62,12 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
             dataloader = DataLoader(dataset,
                                     batch_size=int(cfg.batch_size / cfg.gpu_num),
                                     pin_memory=True)
+
         return dataloader
     elif mode in ['val', 'test']:
         # convert the news to embeddings
         news_dataset = NewsDataset(news_input)
+
         news_dataloader = DataLoader(news_dataset,
                                      batch_size=int(cfg.batch_size * cfg.gpu_num),
                                      num_workers=cfg.num_workers)
@@ -77,19 +80,17 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                 else:
                     batch_emb = model.module.local_news_encoder(news_batch.long().unsqueeze(0).to(local_rank)).squeeze(0).detach()
                 stacked_news.append(batch_emb)
-        news_emb = torch.cat(stacked_news, dim=0).cpu().numpy()   
+        news_emb = torch.cat(stacked_news, dim=0).cpu().numpy()
 
-        if cfg.model.use_graph:
+        if cfg.model.use_graph and mode != 'test':
             news_graph = torch.load(Path(data_dir[mode]) / "nltk_news_graph.pt")
 
             news_neighbors_dict = pickle.load(open(Path(data_dir[mode]) / "news_neighbor_dict.bin", "rb"))
 
             if cfg.model.directed is False:
                 news_graph.edge_index, news_graph.edge_attr = to_undirected(news_graph.edge_index, news_graph.edge_attr)
-            print(f"[{mode}] News Graph Info: {news_graph}")
 
             if cfg.model.use_entity:
-                # entity_graph = torch.load(Path(data_dir[mode]) / "entity_graph.pt")
                 entity_neighbors = pickle.load(open(Path(data_dir[mode]) / "entity_neighbor_dict.bin", "rb"))
                 total_length = sum(len(lst) for lst in entity_neighbors.values())
                 print(f"[{mode}] entity_neighbor list Length: {total_length}")
@@ -105,15 +106,14 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                     cfg=cfg,
                     neighbor_dict=news_neighbors_dict,
                     news_graph=news_graph,
-                    news_entity=news_input[:,-8:-3],
+                    news_entity=news_input[:, -8:-3],
                     entity_neighbors=entity_neighbors
                 )
 
             dataloader = DataLoader(dataset, batch_size=None)
-
         else:
             if mode == 'val':
-                dataset = ValidDataset(
+                dataset = TrainDataset(
                     filename=Path(data_dir[mode]) / f"behaviors_{local_rank}.tsv",
                     news_index=news_index,
                     news_emb=news_emb,
@@ -121,7 +121,7 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
                     cfg=cfg,
                 )
             else:
-                dataset = ValidDataset(
+                dataset = TrainDataset(
                     filename=Path(data_dir[mode]) / f"behaviors.tsv",
                     news_index=news_index,
                     news_emb=news_emb,
@@ -131,11 +131,8 @@ def load_data(cfg, mode='train', model=None, local_rank=0):
 
             dataloader = DataLoader(dataset,
                                     batch_size=1,
-                                    # batch_size=int(cfg.batch_   size / cfg.gpu_num),
-                                    # pin_memory=True, # collate_fn already puts data to GPU
                                     collate_fn=lambda b: collate_fn(b, local_rank))
         return dataloader
-
 
 def collate_fn(tuple_list, local_rank):
     clicked_news = [x[0] for x in tuple_list]

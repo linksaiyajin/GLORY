@@ -16,6 +16,16 @@ class TrainDataset(IterableDataset):
         self.local_rank = local_rank
         self.world_size = cfg.gpu_num
 
+        # Calculate length
+        print(f"Opening file: {filename}")
+        try:
+            with open(filename) as f:
+                self.length = sum(1 for _ in f)
+                print(f"File {filename} contains {self.length} lines.")
+        except Exception as e:
+            print(f"Error opening file {filename}: {e}")
+            self.length = 0
+
     def trans_to_nindex(self, nids):
         return [self.news_index[i] if i in self.news_index else 0 for i in nids]
 
@@ -47,6 +57,9 @@ class TrainDataset(IterableDataset):
     def __iter__(self):
         file_iter = open(self.filename)
         return map(self.line_mapper, file_iter)
+
+    def __len__(self):
+        return self.length
     
     
 class TrainGraphDataset(TrainDataset):
@@ -174,7 +187,6 @@ class TrainGraphDataset(TrainDataset):
                     yield batch, mappings, candidates, candidate_entity_list, entity_mask_list, labels
                     f.seek(0)
 
-
 class ValidGraphDataset(TrainGraphDataset):
     def __init__(self, filename, news_index, news_input, local_rank, cfg, neighbor_dict, news_graph, entity_neighbors, news_entity):
         super().__init__(filename, news_index, news_input, local_rank, cfg, neighbor_dict, news_graph, entity_neighbors)
@@ -231,7 +243,6 @@ class ValidGraphDataset(TrainGraphDataset):
             if line.strip().split('\t')[3]:
                 batch, mapping_idx, clicked_entity, candidate_input, candidate_entity, entity_mask, labels = self.line_mapper(line)
             yield batch, mapping_idx, clicked_entity, candidate_input, candidate_entity, entity_mask, labels
-
 
 class NewsDataset(Dataset):
     def __init__(self, data):

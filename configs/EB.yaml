@@ -14,12 +14,12 @@ optimizer:
 num_epochs: 5
 batch_size: 32            # dataloaders'batch_size = batch_size / gpu_num
 accumulation_steps: 1   # final acutal batch_size = batch_size * accumulation_steps
-gpu_num: 1 #4
+gpu_num: 4 #4
 
 # load or not
 load_checkpoint: false
-load_mark: base_large
-train_mode: true
+load_mark: default_auc_best
+train_mode: false
 val_mode: true
 
 model:
@@ -45,4 +45,4 @@ reprocess_neighbors: true
 warmup_ratio: 0.1
 
 val_skip_epochs: 1
-val_steps: 10000
+val_steps: 5000

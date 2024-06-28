@@ -5,10 +5,10 @@ word_freq_threshold: 1
 entity_size: 5
 
 # dim
-word_emb_dim: 300
-category_emb_dim: 100
-subcategory_emb_dim: 100
-entity_emb_dim: 100
+word_emb_dim: 768
+category_emb_dim: 300
+subcategory_emb_dim: 300
+entity_emb_dim: 300
 
 # For additive attention
 attention_hidden_dim: 200

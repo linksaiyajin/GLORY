@@ -13,7 +13,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 from models.base.layers import *
-
+import pandas as pd
+import ast
 
 class NewsEncoder(nn.Module):
     def __init__(self, cfg, glove_emb=None):
@@ -25,10 +26,10 @@ class NewsEncoder(nn.Module):
             pretrain = torch.from_numpy(glove_emb).float()
             self.word_encoder = nn.Embedding.from_pretrained(pretrain, freeze=False, padding_idx=0)
         elif cfg.dataset.dataset_lang == 'danish':
-            # self.word_encoder = nn.Embedding(glove_emb+1, 300, padding_idx=0)
-            pretrain = torch.from_file('C:\Users\lenna\Documents\UvA\RecSys\GLORY\data\google_bert_base_multilingual_cased\google_bert_base_multilingual_cased\bert_base_multilingual_cased.parquet').float()
+            df = pd.read_parquet('data/bert_base_multilingual_cased.parquet')
+            embeddings = df['google-bert/bert-base-multilingual-cased'].apply(lambda x: list(x)).tolist()
+            pretrain = torch.tensor(embeddings).float()  # Ensure it's a 2D tensor
             self.word_encoder = nn.Embedding.from_pretrained(pretrain, freeze=False, padding_idx=0)
-            # nn.init.uniform_(self.word_encoder.weight, -1.0, 1.0)
         else:
             self.word_encoder = nn.Embedding(glove_emb+1, 300, padding_idx=0)
             nn.init.uniform_(self.word_encoder.weight, -1.0, 1.0)
@@ -55,23 +56,14 @@ class NewsEncoder(nn.Module):
 
 
     def forward(self, news_input, mask=None):
-        """
-        Args:
-            news_input:  [batch_size, news_num, total_input]  eg. [64,50,82] [64,50,96]
-            mask:   [batch_size, news_num]
-        Returns:
-            [batch_size, news_num, news_emb] eg. [64,50,400]
-        """
         batch_size = news_input.shape[0]
         num_news = news_input.shape[1]
 
-        # [batch_size * news_num, view_size, word_emb_dim]
         title_input, _, _, _, _ = news_input.split([self.view_size[0], 5, 1, 1, 1], dim=-1)
-
         title_word_emb = self.word_encoder(title_input.long().view(-1, self.view_size[0]))
 
         total_word_emb = title_word_emb
 
         result = self.attention(total_word_emb, mask)
 
-        return result.view(batch_size, num_news, self.news_dim)     # [batch, num_news, news_dim]
+        return result.view(batch_size, num_news, self.news_dim)
