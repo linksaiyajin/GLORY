@@ -84,7 +84,7 @@ def train(model, optimizer, scaler, scheduler, dataloader, local_rank, cfg, earl
             elif get_better:
                 print(f"Better Result!")
                 if local_rank == 0:
-                    save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc{res['auc']}")
+                    save_model(cfg, model, optimizer, f"{cfg.ml_label}_auc_best")
                     wandb.run.summary.update({"best_auc": res["auc"],"best_mrr":res['mrr'], 
                                          "best_ndcg5":res['ndcg5'], "best_ndcg10":res['ndcg10']})
 

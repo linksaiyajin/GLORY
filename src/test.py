@@ -103,7 +103,8 @@ def main_worker(local_rank, cfg):
     scheduler = LambdaLR(optimizer, lr_lambda)
     
     # ------------------------------------------Load Checkpoint & optimizer
-    if cfg.load_checkpoint:
+    # if cfg.load_checkpoint:
+    if True:
         file_path = Path(f"{cfg.path.ckp_dir}/{cfg.model.model_name}_{cfg.dataset.dataset_name}_{cfg.load_mark}.pth")
         checkpoint = torch.load(file_path, map_location='cpu')
         model.load_state_dict(checkpoint['model_state_dict'])  # After Distributed
@@ -119,7 +120,6 @@ def main_worker(local_rank, cfg):
     if local_rank == 0:
         wandb.init(config=OmegaConf.to_container(cfg, resolve=True),
                    project=cfg.logger.exp_name, name=cfg.logger.run_name)
-        print(model)
 
     val(model, local_rank, cfg)
 

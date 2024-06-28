@@ -63,6 +63,16 @@ python3 src/main.py model=GLORY dataset=MINDsmall reprocess=True
 - src/utils/common.py
   - Load build embeddings dictionary and construct entity embedding matrix
 
+#### Assumes access to training and validation datasets (small)
+```shell
+# Run - Train
+python3 src/main.py model=GLORY dataset=EB-NeRD reprocess=True 
+```
+
+```shell
+# Run - Load & Validate Model
+python3 src/test.py model=GLORY dataset=EB-NeRD reprocess=False 
+```
 
 ### Bibliography
 
